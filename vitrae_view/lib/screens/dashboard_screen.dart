@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:vitrae_view/screens/window_editor_screen.dart';
 import 'add_area_screen.dart';
 import 'add_window_screen.dart';
 import 'profile_screen.dart';
@@ -151,17 +152,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       }
                       return GridView.builder(
                         gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              crossAxisSpacing: 15,
-                              mainAxisSpacing: 15,
-                              childAspectRatio: 0.85,
-                            ),
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 15,
+                          mainAxisSpacing: 15,
+                          childAspectRatio: 0.85,
+                        ),
                         itemCount: windows.length,
                         itemBuilder: (context, index) {
                           var windowData =
-                              windows[index].data() as Map<String, dynamic>;
+                          windows[index].data() as Map<String, dynamic>;
+
+                          // Passar o ID do documento da janela para o widget
+                          String windowId = windows[index].id;
+
                           return _buildWindowCard(
+                            windowId,
                             windowData['nome'] ?? 'Sem nome',
                             windowData['estado'] ?? 'Fechado',
                           );
@@ -282,56 +288,68 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _newAreaController.clear();
   }
 
-  Widget _buildWindowCard(String nome, String estado) {
+  Widget _buildWindowCard(String windowId, String nome, String estado) {
     bool isOpen = estado == 'Aberto';
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
+    return InkWell( // <--- Torna o cartão clicável com efeito de splash
+      onTap: () {
+        // Redireciona para o Editor de Janelas passando o ID único da janela
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => WindowEditorScreen(windowId: windowId),
           ),
-        ],
-        border: Border.all(color: Colors.blueAccent.withOpacity(0.1)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            isOpen ? Icons.window_outlined : Icons.window,
-            size: 50,
-            color: Colors.blueAccent,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            nome,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            maxLines: 1,
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: isOpen
-                  ? Colors.green.withOpacity(0.1)
-                  : Colors.red.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(10),
+        );
+      },
+      borderRadius: BorderRadius.circular(20), // Para o efeito de clique respeitar as bordas
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
             ),
-            child: Text(
-              estado,
-              style: TextStyle(
-                color: isOpen ? Colors.green : Colors.red,
-                fontWeight: FontWeight.bold,
-                fontSize: 12,
+          ],
+          border: Border.all(color: Colors.blueAccent.withOpacity(0.1)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isOpen ? Icons.window_outlined : Icons.window,
+              size: 50,
+              color: Colors.blueAccent,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              nome,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              maxLines: 1,
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: isOpen
+                    ? Colors.green.withOpacity(0.1)
+                    : Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                estado,
+                style: TextStyle(
+                  color: isOpen ? Colors.green : Colors.red,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
