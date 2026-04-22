@@ -43,3 +43,28 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# =========================
+# SEGURANÇA E CHAVES API
+# =========================
+
+# Chave de Admin do Firebase (USADA NO TEU RASPBERRY PI)
+# NUNCA faças commit disto, senão qualquer pessoa tem acesso à tua BD!
+serviceAccountKey.json
+
+# Ficheiro de configuração local do Raspberry Pi
+vitrae_id.txt
+
+# Ficheiros de Variáveis de Ambiente (onde deves guardar a API do LastFM, etc.)
+.env
+.env.*
+
+# Ficheiros de configuração da App Flutter para as Lojas (Play Store/App Store)
+/android/key.properties
+*.jks
+*.keystore
+
+# Ficheiros nativos do Firebase para Flutter (gerados automaticamente)
+# Nota: O firebase_options.dart pode ir para o Git, mas os plist/json nativos é seguro ignorar se forem gerados localmente.
+google-services.json
+GoogleService-Info.plist
