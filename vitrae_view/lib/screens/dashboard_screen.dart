@@ -43,7 +43,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 fit: BoxFit.contain,
                 // Se a imagem não existir ainda, mostra um ícone de erro para não quebrar a app
                 errorBuilder: (context, error, stackTrace) =>
-                    const Icon(Icons.broken_image, color: Colors.grey),
+                const Icon(Icons.broken_image, color: Colors.grey),
               ),
             ),
             const SizedBox(width: 12),
@@ -61,6 +61,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         );
       },
+    );
+  }
+
+  // --- POP-UP DE CONFIRMAÇÃO DE LOGOUT ---
+  void _showLogoutConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.logout, color: Colors.redAccent),
+            SizedBox(width: 10),
+            Text("Terminar Sessão"),
+          ],
+        ),
+        content: const Text("Tem a certeza que quer sair da sua conta?"),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              Navigator.pop(context); // Fecha o pop-up
+              FirebaseAuth.instance.signOut(); // Termina a sessão
+            },
+            child: const Text("Sair"),
+          ),
+        ],
+      ),
     );
   }
 
@@ -112,7 +147,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               IconButton(
                 icon: const Icon(Icons.logout),
-                onPressed: () => FirebaseAuth.instance.signOut(),
+                onPressed: () => _showLogoutConfirmation(context), // <--- Pop-up adicionado aqui
               ),
             ],
           ),
@@ -163,13 +198,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           var windowData =
                           windows[index].data() as Map<String, dynamic>;
 
-                          // Passar o ID do documento da janela para o widget
                           String windowId = windows[index].id;
 
                           return _buildWindowCard(
                             windowId,
                             windowData['nome'] ?? 'Sem nome',
-                            windowData['estado'] ?? 'Fechado',
+                            windowData['estado'] ?? 'Desligada', // Default para Desligada
                           );
                         },
                       );
@@ -181,18 +215,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           bottomNavigationBar: nomesAreas.length > 1
               ? BottomNavigationBar(
-                  currentIndex: _selectedIndex,
-                  selectedItemColor: Colors.blueAccent,
-                  onTap: (index) => setState(() => _selectedIndex = index),
-                  items: nomesAreas
-                      .map(
-                        (nome) => BottomNavigationBarItem(
-                          icon: const Icon(Icons.place),
-                          label: nome,
-                        ),
-                      )
-                      .toList(),
-                )
+            currentIndex: _selectedIndex,
+            selectedItemColor: Colors.blueAccent,
+            onTap: (index) => setState(() => _selectedIndex = index),
+            items: nomesAreas
+                .map(
+                  (nome) => BottomNavigationBarItem(
+                icon: const Icon(Icons.place),
+                label: nome,
+              ),
+            )
+                .toList(),
+          )
               : null,
         );
       },
@@ -204,7 +238,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildEmptyState(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: _buildAppBarTitle(), // <--- Título Dinâmico também aqui
+        title: _buildAppBarTitle(),
         actions: [
           IconButton(
             icon: const Icon(Icons.person_outline),
@@ -215,7 +249,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () => FirebaseAuth.instance.signOut(),
+            onPressed: () => _showLogoutConfirmation(context), // <--- Pop-up adicionado aqui também
           ),
         ],
       ),
@@ -288,65 +322,74 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _newAreaController.clear();
   }
 
-  Widget _buildWindowCard(String windowId, String nome, String estado) {
-    bool isOpen = estado == 'Aberto';
-    return InkWell( // <--- Torna o cartão clicável com efeito de splash
-      onTap: () {
-        // Redireciona para o Editor de Janelas passando o ID único da janela
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => WindowEditorScreen(windowId: windowId),
+  // --- ADICIONA ESTE NOVO MÉTODO (Pop-Up de Apagar Janela) ---
+  void _showDeleteWindowDialog(String windowId, String nome) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.delete_forever, color: Colors.redAccent),
+            SizedBox(width: 10),
+            Text("Remover Janela"),
+          ],
+        ),
+        content: Text("Tem a certeza que quer apagar a janela '$nome'? Esta ação é irreversível."),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
           ),
-        );
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(context); // Fecha o pop-up
+              // Apaga a janela definitivamente da base de dados!
+              await FirebaseFirestore.instance.collection('windows').doc(windowId).delete();
+              if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Janela removida com sucesso!')));
+            },
+            child: const Text("Apagar"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- SUBSTITUI O TEU _buildWindowCard POR ESTE (Agora tem onLongPress) ---
+  Widget _buildWindowCard(String windowId, String nome, String estado) {
+    bool isOn = (estado == 'Ligada' || estado == 'Aberto');
+    String displayEstado = isOn ? 'Ligada' : 'Desligada';
+
+    return InkWell(
+      onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder: (context) => WindowEditorScreen(windowId: windowId)));
       },
-      borderRadius: BorderRadius.circular(20), // Para o efeito de clique respeitar as bordas
+      // MAGIA: Pressionar longo para apagar a janela!
+      onLongPress: () => _showDeleteWindowDialog(windowId, nome),
+      borderRadius: BorderRadius.circular(20),
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withOpacity(0.1),
-              blurRadius: 10,
-              offset: const Offset(0, 5),
-            ),
-          ],
+          boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))],
           border: Border.all(color: Colors.blueAccent.withOpacity(0.1)),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              isOpen ? Icons.window_outlined : Icons.window,
-              size: 50,
-              color: Colors.blueAccent,
-            ),
+            Icon(isOn ? Icons.window : Icons.window_outlined, size: 50, color: Colors.blueAccent),
             const SizedBox(height: 12),
-            Text(
-              nome,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              maxLines: 1,
-            ),
+            Text(nome, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
-                color: isOpen
-                    ? Colors.green.withOpacity(0.1)
-                    : Colors.red.withOpacity(0.1),
+                color: isOn ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Text(
-                estado,
-                style: TextStyle(
-                  color: isOpen ? Colors.green : Colors.red,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
+              child: Text(displayEstado, style: TextStyle(color: isOn ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
             ),
           ],
         ),
