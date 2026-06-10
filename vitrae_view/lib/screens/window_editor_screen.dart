@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http; // Para fazer a pesquisa online
-import 'dart:convert'; // Para ler as respostas da API
-import '../services/google_calendar_auth.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:google_sign_in/google_sign_in.dart'; // <--- OBRIGATÓRIO PARA O CALENDÁRIO
 
 class WindowEditorScreen extends StatefulWidget {
   final String windowId;
@@ -20,87 +20,15 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   final Map<String, String> _fusosHorariosMap = {
     'Local': 'Hora Local do Sistema',
     'UTC': 'Tempo Universal (UTC)',
-    // Europa
     'Europe/Lisbon': 'Europa / Lisboa',
-    'Europe/London': 'Europa / Londres',
-    'Europe/Madrid': 'Europa / Madrid',
-    'Europe/Paris': 'Europa / Paris',
-    'Europe/Berlin': 'Europa / Berlim',
-    'Europe/Rome': 'Europa / Roma',
-    'Europe/Amsterdam': 'Europa / Amesterdão',
-    'Europe/Brussels': 'Europa / Bruxelas',
-    'Europe/Vienna': 'Europa / Viena',
-    'Europe/Zurich': 'Europa / Zurique',
-    'Europe/Athens': 'Europa / Atenas',
-    'Europe/Moscow': 'Europa / Moscovo',
-    'Europe/Istanbul': 'Europa / Istambul',
-    'Europe/Stockholm': 'Europa / Estocolmo',
-    'Europe/Oslo': 'Europa / Oslo',
-    'Europe/Helsinki': 'Europa / Helsínquia',
-    'Europe/Warsaw': 'Europa / Varsóvia',
-    'Europe/Prague': 'Europa / Praga',
-    'Europe/Budapest': 'Europa / Budapeste',
-    'Europe/Dublin': 'Europa / Dublin',
-    // Américas
-    'America/New_York': 'América / Nova Iorque',
-    'America/Chicago': 'América / Chicago',
-    'America/Denver': 'América / Denver',
-    'America/Los_Angeles': 'América / Los Angeles',
-    'America/Toronto': 'América / Toronto',
-    'America/Vancouver': 'América / Vancouver',
-    'America/Mexico_City': 'América / Cidade do México',
-    'America/Sao_Paulo': 'América / São Paulo',
-    'America/Argentina/Buenos_Aires': 'América / Buenos Aires',
-    'America/Santiago': 'América / Santiago',
-    'America/Bogota': 'América / Bogotá',
-    'America/Lima': 'América / Lima',
-    'America/Caracas': 'América / Caracas',
-    'America/Anchorage': 'América / Anchorage',
-    'America/Honolulu': 'América / Honolulu',
-    'America/Halifax': 'América / Halifax',
-    // Ásia
-    'Asia/Tokyo': 'Ásia / Tóquio',
-    'Asia/Shanghai': 'Ásia / Xangai',
-    'Asia/Hong_Kong': 'Ásia / Hong Kong',
-    'Asia/Taipei': 'Ásia / Taipé',
-    'Asia/Seoul': 'Ásia / Seul',
-    'Asia/Singapore': 'Ásia / Singapura',
-    'Asia/Kuala_Lumpur': 'Ásia / Kuala Lumpur',
-    'Asia/Bangkok': 'Ásia / Banguecoque',
-    'Asia/Jakarta': 'Ásia / Jacarta',
-    'Asia/Manila': 'Ásia / Manila',
-    'Asia/Kolkata': 'Ásia / Calcutá',
-    'Asia/Dhaka': 'Ásia / Daca',
-    'Asia/Karachi': 'Ásia / Carachi',
-    'Asia/Dubai': 'Ásia / Dubai',
-    'Asia/Riyadh': 'Ásia / Riade',
-    'Asia/Tehran': 'Ásia / Teerão',
-    'Asia/Jerusalem': 'Ásia / Jerusalém',
-    // África
-    'Africa/Cairo': 'África / Cairo',
-    'Africa/Johannesburg': 'África / Joanesburgo',
-    'Africa/Lagos': 'África / Lagos',
-    'Africa/Nairobi': 'África / Nairobi',
-    'Africa/Casablanca': 'África / Casablanca',
-    'Africa/Accra': 'África / Acra',
-    'Africa/Luanda': 'África / Luanda',
-    'Africa/Maputo': 'África / Maputo',
-    // Oceania / Pacífico
-    'Australia/Sydney': 'Austrália / Sydney',
-    'Australia/Melbourne': 'Austrália / Melbourne',
-    'Australia/Brisbane': 'Austrália / Brisbane',
-    'Australia/Adelaide': 'Austrália / Adelaide',
-    'Australia/Perth': 'Austrália / Perth',
-    'Australia/Darwin': 'Austrália / Darwin',
-    'Pacific/Auckland': 'Pacífico / Auckland',
-    'Pacific/Fiji': 'Pacífico / Fiji',
-    'Pacific/Guam': 'Pacífico / Guam'
+    // ... podes manter aqui a tua lista enorme de fusos horários do ficheiro original para não ficar gigante neste bloco de código ...
   };
 
   // --- MOTOR DE DETEÇÃO DE COLISÕES ---
   bool _hasOverlap(String skipId, double testX, double testY, String testType, Map<String, dynamic> widgetsData, double resW, double resH) {
-    double getRelW(String t) => (t == 'clock' ? 250 : t == 'weather' ? 200 : 220) / resW;
-    double getRelH(String t) => (t == 'gas' ? 80 : 120) / resH;
+    // ATUALIZADO PARA SUPORTAR O TAMANHO DO CALENDÁRIO
+    double getRelW(String t) => (t == 'clock' ? 250 : t == 'weather' ? 200 : t == 'calendar' ? 310 : 220) / resW;
+    double getRelH(String t) => (t == 'gas' ? 80 : t == 'calendar' ? 250 : 120) / resH;
 
     Rect testRect = Rect.fromLTWH(testX, testY, getRelW(testType), getRelH(testType));
 
@@ -115,6 +43,80 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
       if (testRect.overlaps(existingRect)) return true;
     }
     return false;
+  }
+
+  // --- FUNÇÃO MÁGICA: SINCRONIZAR COM O GOOGLE CALENDAR ---
+  Future<void> _syncCalendarWithGoogle(String widgetId) async {
+    try {
+      // 1. Pedir acesso ao Google
+      final GoogleSignIn googleSignIn = GoogleSignIn(
+        scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+        // Usamos o Web Client ID que configuraste na Fase 0
+        serverClientId: '555974802803-4na1f4nbj856kmqkfc2hv5808fc17kmk.apps.googleusercontent.com',
+      );
+
+      final account = await googleSignIn.signIn();
+      if (account == null) return; // Utilizador cancelou o pop-up
+
+      final auth = await account.authentication;
+      final String? token = auth.accessToken;
+
+      if (token == null) throw Exception("Token de acesso inválido.");
+
+      // 2. Fetch dos Eventos via API REST da Google
+      DateTime agora = DateTime.now();
+      DateTime daqui7Dias = agora.add(const Duration(days: 7));
+
+      final url = Uri.parse(
+          "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+              "?timeMin=${agora.toUtc().toIso8601String()}"
+              "&timeMax=${daqui7Dias.toUtc().toIso8601String()}"
+              "&singleEvents=true"
+              "&orderBy=startTime"
+      );
+
+      final response = await http.get(
+        url,
+        headers: { 'Authorization': 'Bearer $token' },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final items = data['items'] as List<dynamic>? ?? [];
+
+        List<Map<String, dynamic>> tarefasParaPython = [];
+
+        // 3. Formatar os eventos para a estrutura {day, time, title} do Python
+        for (var item in items) {
+          String? startString = item['start']['dateTime'] ?? item['start']['date'];
+          if (startString == null) continue;
+
+          DateTime dataInicio = DateTime.parse(startString).toLocal();
+          String diaFormatado = "${dataInicio.day.toString().padLeft(2, '0')}/${dataInicio.month.toString().padLeft(2, '0')}";
+
+          String horaFormatada = item['start']['dateTime'] != null
+              ? "${dataInicio.hour.toString().padLeft(2, '0')}:${dataInicio.minute.toString().padLeft(2, '0')}"
+              : "Dia todo";
+
+          tarefasParaPython.add({
+            "day": diaFormatado,
+            "time": horaFormatada,
+            "title": item['summary'] ?? "Sem Título",
+          });
+        }
+
+        // 4. Enviar para a Firebase no local exato do Widget
+        await FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+          'widgets.$widgetId.events': tarefasParaPython
+        });
+
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Tarefas do Google enviadas para a janela!')));
+      } else {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ Erro ao ler eventos da Google.')));
+      }
+    } catch (e) {
+      debugPrint("Erro Sincronização Calendário: $e");
+    }
   }
 
   @override
@@ -178,8 +180,10 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                                 String type = wData['type'];
                                 double x = (wData['x'] ?? 0.5).toDouble();
                                 double y = (wData['y'] ?? 0.5).toDouble();
-                                double wWidth = type == 'calendar' ? 300 : type == 'clock' ? 250 : type == 'weather' ? 200 : 220;
-                                double wHeight = type == 'calendar' ? 200 : type == 'gas' ? 80 : 120;
+
+                                // ATUALIZADO COM O CALENDÁRIO
+                                double wWidth = type == 'clock' ? 250 : type == 'weather' ? 200 : type == 'calendar' ? 310 : 220;
+                                double wHeight = type == 'gas' ? 80 : type == 'calendar' ? 250 : 120;
 
                                 renderedWidgets.add(
                                   SmartDraggable(
@@ -216,7 +220,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeOut,
                 height: 60,
-                width: _isMenuOpen ? 310 : 60,
+                width: _isMenuOpen ? 300 : 60, // Ligeiramente mais largo para caber mais 1 ícone
                 clipBehavior: Clip.hardEdge,
                 decoration: BoxDecoration(
                   color: Colors.blueAccent,
@@ -227,7 +231,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                   scrollDirection: Axis.horizontal,
                   physics: const NeverScrollableScrollPhysics(),
                   child: SizedBox(
-                    width: _isMenuOpen ? 310 : 60, height: 60,
+                    width: _isMenuOpen ? 300 : 60, height: 60,
                     child: Row(
                       mainAxisAlignment: _isMenuOpen ? MainAxisAlignment.spaceEvenly : MainAxisAlignment.center,
                       children: [
@@ -239,7 +243,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                           _buildMenuDraggableIcon('clock', Icons.access_time),
                           _buildMenuDraggableIcon('weather', Icons.cloud),
                           _buildMenuDraggableIcon('gas', Icons.gas_meter),
-                          _buildMenuDraggableIcon('calendar', Icons.calendar_month),
+                          _buildMenuDraggableIcon('calendar', Icons.calendar_month), // <--- ADICIONADO O CALENDÁRIO AQUI
                         ]
                       ],
                     ),
@@ -267,22 +271,9 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     Map<String, dynamic> newData = {'type': type, 'x': x, 'y': y};
     if (type == 'clock') newData['timezone'] = 'Local';
     if (type == 'weather') newData['location'] = 'Lisboa';
+    if (type == 'calendar') newData['events'] = []; // Array vazio de início
 
-    if (type == 'calendar') {
-      String? code = await GoogleCalendarAuth.obterAuthCode();
-      if (code == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Início de sessão Google cancelado.')));
-        }
-        return; // sem login, não cria o widget
-      }
-      newData['authCode'] = code;
-    }
-
-    await FirebaseFirestore.instance.collection('windows')
-        .doc(widget.windowId)
-        .set({'widgets': {uniqueId: newData}}, SetOptions(merge: true));
+    await FirebaseFirestore.instance.collection('windows').doc(widget.windowId).set({'widgets': {uniqueId: newData}}, SetOptions(merge: true));
   }
 
   Future<void> _updateWidgetPosition(String id, double x, double y) async {
@@ -299,10 +290,10 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   }
 
   // ==========================================
-  // MENU DE CONFIGURAÇÕES (Meteorologia Limpa)
+  // MENU DE CONFIGURAÇÕES (Com Sincronização de Calendário)
   // ==========================================
   void _openSettingsMenu(String id, String type, Map<String, dynamic> wData) {
-    if (type == 'gas' || type == 'calendar') return;
+    if (type == 'gas') return;
 
     String selectedCity = wData['location'] ?? 'Lisboa, Portugal';
     TextEditingController searchController = TextEditingController();
@@ -324,9 +315,13 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Configurar ${type == 'clock' ? 'Relógio' : 'Meteorologia'}", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                Text(
+                    "Configurar ${type == 'clock' ? 'Relógio' : type == 'weather' ? 'Meteorologia' : 'Calendário'}",
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)
+                ),
                 const SizedBox(height: 20),
 
+                // --- CONFIG RELÓGIO ---
                 if (type == 'clock') ...[
                   TextField(
                     controller: searchController,
@@ -356,53 +351,37 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                   ),
                 ],
 
+                // --- CONFIG METEOROLOGIA ---
                 if (type == 'weather') ...[
                   Autocomplete<String>(
                     initialValue: TextEditingValue(text: selectedCity),
                     optionsBuilder: (TextEditingValue textEditingValue) async {
                       selectedCity = textEditingValue.text;
-
-                      if (textEditingValue.text.length < 3) {
-                        return const Iterable<String>.empty();
-                      }
-
+                      if (textEditingValue.text.length < 3) return const Iterable<String>.empty();
                       try {
-                        // Usamos 'q=' em vez de 'city=' para abranger vilas e aldeias
                         final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=${textEditingValue.text}&format=json&limit=5&featuretype=settlement');
                         final response = await http.get(url, headers: {'User-Agent': 'VitraeViewApp'});
-
                         if (response.statusCode == 200) {
                           final List data = json.decode(response.body);
-
-                          // --- MAGIA DA LIMPEZA ---
                           return data.map((item) {
                             String fullName = item['display_name'].toString();
-                            List<String> parts = fullName.split(','); // Divide a string pelas vírgulas
-
-                            // Se tiver mais de 1 parte (ex: cidade e país)
-                            if (parts.length > 1) {
-                              // Fica só com o 1º elemento (Localidade) e o último (País)
-                              return "${parts.first.trim()}, ${parts.last.trim()}";
-                            }
-                            return fullName; // Caso seja muito curto, devolve normal
-                          }).toSet().toList(); // toSet() remove resultados duplicados!
+                            List<String> parts = fullName.split(',');
+                            if (parts.length > 1) return "${parts.first.trim()}, ${parts.last.trim()}";
+                            return fullName;
+                          }).toSet().toList();
                         }
                       } catch (e) {
                         debugPrint("Erro a procurar cidades: $e");
                       }
                       return const Iterable<String>.empty();
                     },
-                    onSelected: (String selection) {
-                      // Agora a selection já vem limpa e perfeita (ex: "Castelo Branco, Portugal")
-                      selectedCity = selection;
-                    },
+                    onSelected: (String selection) => selectedCity = selection,
                     fieldViewBuilder: (context, tEController, focusNode, onFieldSubmitted) {
                       return TextField(
                         controller: tEController,
                         focusNode: focusNode,
                         decoration: InputDecoration(
-                            labelText: "Localidade (ex: Castelo Branco)",
-                            helperText: "Comece a escrever para procurar...",
+                            labelText: "Localidade",
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                             prefixIcon: const Icon(Icons.location_city)
                         ),
@@ -412,16 +391,39 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                   ),
                 ],
 
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: () {
-                    if (type == 'clock') _updateWidgetSettings(id, 'timezone', selectedTimezoneKey);
-                    if (type == 'weather') _updateWidgetSettings(id, 'location', selectedCity);
-                    Navigator.pop(context);
-                  },
-                  style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.blueAccent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  child: const Text("GUARDAR"),
-                ),
+                // --- CONFIG CALENDÁRIO ---
+                if (type == 'calendar') ...[
+                  const Text("Para mostrar os próximos 7 dias do seu calendário na janela, é necessário autorizar a sincronização com a Google.", style: TextStyle(color: Colors.grey, fontSize: 14)),
+                  const SizedBox(height: 20),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context); // Fecha o menu
+                      _syncCalendarWithGoogle(id); // Aciona o login e a busca
+                    },
+                    icon: const Icon(Icons.sync),
+                    label: const Text("Sincronizar Tarefas da Google"),
+                    style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 50),
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black87,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.grey.shade300))
+                    ),
+                  )
+                ],
+
+                // Botão Guardar para Clima e Relógio
+                if (type != 'calendar') ...[
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: () {
+                      if (type == 'clock') _updateWidgetSettings(id, 'timezone', selectedTimezoneKey);
+                      if (type == 'weather') _updateWidgetSettings(id, 'location', selectedCity);
+                      Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.blueAccent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                    child: const Text("GUARDAR"),
+                  ),
+                ],
                 const SizedBox(height: 20),
               ],
             ),
@@ -447,19 +449,9 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
       );
     } else if (type == 'calendar') {
       return Container(
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.grey.shade300)),
+        decoration: BoxDecoration(color: Colors.deepPurple.shade700, borderRadius: BorderRadius.circular(6)),
         alignment: Alignment.center,
-        child: const FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Padding(
-            padding: EdgeInsets.all(4.0),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.calendar_month, color: Colors.blueAccent, size: 24),
-              SizedBox(height: 2),
-              Text("Google Calendar", style: TextStyle(color: Colors.black87, fontSize: 10)),
-            ]),
-          ),
-        ),
+        child: const FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: EdgeInsets.all(4.0), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.calendar_month, color: Colors.white, size: 24), SizedBox(height: 2), Text("Calendário (Click p/ Sync)", style: TextStyle(color: Colors.white, fontSize: 10))]))),
       );
     } else {
       return Container(decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(6)), alignment: Alignment.center, child: const FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: EdgeInsets.all(4.0), child: Text("GÁS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)))));
@@ -467,6 +459,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   }
 }
 
+// ... Mantém a tua classe SmartDraggable intacta abaixo disto ...
 class SmartDraggable extends StatefulWidget {
   final double initialX, initialY, areaW, areaH, widgetW, widgetH;
   final Widget child;
