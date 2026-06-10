@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'package:vitrae_view/screens/login_screen.dart';
 import 'package:vitrae_view/screens/dashboard_screen.dart';
+import '../services/google_calendar_auth.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

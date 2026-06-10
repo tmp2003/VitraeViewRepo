@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http; // Para fazer a pesquisa online
 import 'dart:convert'; // Para ler as respostas da API
+import '../services/google_calendar_auth.dart';
 
 class WindowEditorScreen extends StatefulWidget {
   final String windowId;
@@ -177,8 +178,8 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                                 String type = wData['type'];
                                 double x = (wData['x'] ?? 0.5).toDouble();
                                 double y = (wData['y'] ?? 0.5).toDouble();
-                                double wWidth = type == 'clock' ? 250 : type == 'weather' ? 200 : 220;
-                                double wHeight = type == 'gas' ? 80 : 120;
+                                double wWidth = type == 'calendar' ? 300 : type == 'clock' ? 250 : type == 'weather' ? 200 : 220;
+                                double wHeight = type == 'calendar' ? 200 : type == 'gas' ? 80 : 120;
 
                                 renderedWidgets.add(
                                   SmartDraggable(
@@ -215,7 +216,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeOut,
                 height: 60,
-                width: _isMenuOpen ? 250 : 60,
+                width: _isMenuOpen ? 310 : 60,
                 clipBehavior: Clip.hardEdge,
                 decoration: BoxDecoration(
                   color: Colors.blueAccent,
@@ -226,7 +227,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                   scrollDirection: Axis.horizontal,
                   physics: const NeverScrollableScrollPhysics(),
                   child: SizedBox(
-                    width: _isMenuOpen ? 250 : 60, height: 60,
+                    width: _isMenuOpen ? 310 : 60, height: 60,
                     child: Row(
                       mainAxisAlignment: _isMenuOpen ? MainAxisAlignment.spaceEvenly : MainAxisAlignment.center,
                       children: [
@@ -238,6 +239,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                           _buildMenuDraggableIcon('clock', Icons.access_time),
                           _buildMenuDraggableIcon('weather', Icons.cloud),
                           _buildMenuDraggableIcon('gas', Icons.gas_meter),
+                          _buildMenuDraggableIcon('calendar', Icons.calendar_month),
                         ]
                       ],
                     ),
@@ -266,7 +268,21 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     if (type == 'clock') newData['timezone'] = 'Local';
     if (type == 'weather') newData['location'] = 'Lisboa';
 
-    await FirebaseFirestore.instance.collection('windows').doc(widget.windowId).set({'widgets': {uniqueId: newData}}, SetOptions(merge: true));
+    if (type == 'calendar') {
+      String? code = await GoogleCalendarAuth.obterAuthCode();
+      if (code == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Início de sessão Google cancelado.')));
+        }
+        return; // sem login, não cria o widget
+      }
+      newData['authCode'] = code;
+    }
+
+    await FirebaseFirestore.instance.collection('windows')
+        .doc(widget.windowId)
+        .set({'widgets': {uniqueId: newData}}, SetOptions(merge: true));
   }
 
   Future<void> _updateWidgetPosition(String id, double x, double y) async {
@@ -286,7 +302,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   // MENU DE CONFIGURAÇÕES (Meteorologia Limpa)
   // ==========================================
   void _openSettingsMenu(String id, String type, Map<String, dynamic> wData) {
-    if (type == 'gas') return;
+    if (type == 'gas' || type == 'calendar') return;
 
     String selectedCity = wData['location'] ?? 'Lisboa, Portugal';
     TextEditingController searchController = TextEditingController();
@@ -428,6 +444,22 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
         decoration: BoxDecoration(color: Colors.blueAccent.shade700, borderRadius: BorderRadius.circular(6)),
         alignment: Alignment.center,
         child: FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: const EdgeInsets.all(4.0), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.cloud, color: Colors.white, size: 24), const SizedBox(height: 2), Text(data['location'] ?? 'Lisboa', style: const TextStyle(color: Colors.white, fontSize: 10))]))),
+      );
+    } else if (type == 'calendar') {
+      return Container(
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.grey.shade300)),
+        alignment: Alignment.center,
+        child: const FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Padding(
+            padding: EdgeInsets.all(4.0),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.calendar_month, color: Colors.blueAccent, size: 24),
+              SizedBox(height: 2),
+              Text("Google Calendar", style: TextStyle(color: Colors.black87, fontSize: 10)),
+            ]),
+          ),
+        ),
       );
     } else {
       return Container(decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(6)), alignment: Alignment.center, child: const FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: EdgeInsets.all(4.0), child: Text("GÁS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)))));
