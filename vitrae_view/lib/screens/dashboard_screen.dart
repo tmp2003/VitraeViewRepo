@@ -358,8 +358,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // --- SUBSTITUI O TEU _buildWindowCard POR ESTE (Agora tem onLongPress) ---
   Widget _buildWindowCard(String windowId, String nome, String estado) {
-    bool isOn = (estado == 'Ligada' || estado == 'Aberto');
-    String displayEstado = isOn ? 'Ligada' : 'Desligada';
+    bool isOn = (estado == 'Ativa');
+    String displayEstado = isOn ? 'Ativa' : 'Inativa';
 
     return InkWell(
       onTap: () {

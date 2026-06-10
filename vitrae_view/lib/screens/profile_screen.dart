@@ -72,24 +72,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
           email: _user!.email!,
           password: _oldPasswordController.text,
         );
-        await _user!.reauthenticateWithCredential(credential);
+        await _user.reauthenticateWithCredential(credential);
 
         if (_oldPasswordController.text.isNotEmpty) {
           AuthCredential credential = EmailAuthProvider.credential(
-            email: _user!.email!,
+            email: _user.email!,
             password: _oldPasswordController.text,
           );
-          await _user!.reauthenticateWithCredential(credential);
+          await _user.reauthenticateWithCredential(credential);
 
           // Alterar Password (este método ainda funciona igual)
           if (_newPasswordController.text.isNotEmpty) {
-            await _user!.updatePassword(_newPasswordController.text);
+            await _user.updatePassword(_newPasswordController.text);
           }
 
           // Alterar Email (O NOVO MÉTODO)
-          if (_emailController.text != _user!.email) {
+          if (_emailController.text != _user.email) {
             // Em vez de updateEmail, usamos este:
-            await _user!.verifyBeforeUpdateEmail(_emailController.text.trim());
+            await _user.verifyBeforeUpdateEmail(_emailController.text.trim());
 
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(

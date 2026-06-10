@@ -111,7 +111,7 @@ class _AddWindowScreenState extends State<AddWindowScreen> {
         'nome': nomeJanela,
         'userId': _uid,
         'areaId': finalAreaId,
-        'estado': 'Fechado',
+        'estado': 'Inativa',
         'luminosidade': 0,
         'gas': 0,
         'dataRegisto': FieldValue.serverTimestamp(),
@@ -183,7 +183,7 @@ class _AddWindowScreenState extends State<AddWindowScreen> {
                           labelText: "Escolher Divisão",
                           border: OutlineInputBorder(),
                         ),
-                        value: _areaIdSelecionada,
+                        initialValue: _areaIdSelecionada,
                         items: areas
                             .map(
                               (doc) => DropdownMenuItem(
