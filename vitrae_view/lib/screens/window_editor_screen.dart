@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:google_sign_in/google_sign_in.dart'; // <--- OBRIGATÓRIO PARA O CALENDÁRIO
+import 'package:google_sign_in/google_sign_in.dart';
 
 class WindowEditorScreen extends StatefulWidget {
   final String windowId;
@@ -21,12 +21,12 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     'Local': 'Hora Local do Sistema',
     'UTC': 'Tempo Universal (UTC)',
     'Europe/Lisbon': 'Europa / Lisboa',
-    // ... podes manter aqui a tua lista enorme de fusos horários do ficheiro original para não ficar gigante neste bloco de código ...
+    'Europe/London': 'Europa / Londres',
+    'America/New_York': 'América / Nova Iorque',
+    'Asia/Tokyo': 'Ásia / Tóquio',
   };
 
-  // --- MOTOR DE DETEÇÃO DE COLISÕES ---
   bool _hasOverlap(String skipId, double testX, double testY, String testType, Map<String, dynamic> widgetsData, double resW, double resH) {
-    // ATUALIZADO PARA SUPORTAR O TAMANHO DO CALENDÁRIO
     double getRelW(String t) => (t == 'clock' ? 250 : t == 'weather' ? 200 : t == 'calendar' ? 310 : 220) / resW;
     double getRelH(String t) => (t == 'gas' ? 80 : t == 'calendar' ? 250 : 120) / resH;
 
@@ -45,77 +45,30 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     return false;
   }
 
-  // --- FUNÇÃO MÁGICA: SINCRONIZAR COM O GOOGLE CALENDAR ---
   Future<void> _syncCalendarWithGoogle(String widgetId) async {
     try {
-      // 1. Pedir acesso ao Google
       final GoogleSignIn googleSignIn = GoogleSignIn(
         scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
-        // Usamos o Web Client ID que configuraste na Fase 0
         serverClientId: '555974802803-4na1f4nbj856kmqkfc2hv5808fc17kmk.apps.googleusercontent.com',
+        forceCodeForRefreshToken: true,
       );
 
+      // Limpa a cache para garantir que pede sempre a conta
+      await googleSignIn.signOut();
       final account = await googleSignIn.signIn();
-      if (account == null) return; // Utilizador cancelou o pop-up
+      if (account == null) return;
 
-      final auth = await account.authentication;
-      final String? token = auth.accessToken;
+      final String? authCode = account.serverAuthCode;
 
-      if (token == null) throw Exception("Token de acesso inválido.");
-
-      // 2. Fetch dos Eventos via API REST da Google
-      DateTime agora = DateTime.now();
-      DateTime daqui7Dias = agora.add(const Duration(days: 7));
-
-      final url = Uri.parse(
-          "https://www.googleapis.com/calendar/v3/calendars/primary/events"
-              "?timeMin=${agora.toUtc().toIso8601String()}"
-              "&timeMax=${daqui7Dias.toUtc().toIso8601String()}"
-              "&singleEvents=true"
-              "&orderBy=startTime"
-      );
-
-      final response = await http.get(
-        url,
-        headers: { 'Authorization': 'Bearer $token' },
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final items = data['items'] as List<dynamic>? ?? [];
-
-        List<Map<String, dynamic>> tarefasParaPython = [];
-
-        // 3. Formatar os eventos para a estrutura {day, time, title} do Python
-        for (var item in items) {
-          String? startString = item['start']['dateTime'] ?? item['start']['date'];
-          if (startString == null) continue;
-
-          DateTime dataInicio = DateTime.parse(startString).toLocal();
-          String diaFormatado = "${dataInicio.day.toString().padLeft(2, '0')}/${dataInicio.month.toString().padLeft(2, '0')}";
-
-          String horaFormatada = item['start']['dateTime'] != null
-              ? "${dataInicio.hour.toString().padLeft(2, '0')}:${dataInicio.minute.toString().padLeft(2, '0')}"
-              : "Dia todo";
-
-          tarefasParaPython.add({
-            "day": diaFormatado,
-            "time": horaFormatada,
-            "title": item['summary'] ?? "Sem Título",
-          });
-        }
-
-        // 4. Enviar para a Firebase no local exato do Widget
-        await FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
-          'widgets.$widgetId.events': tarefasParaPython
+      if (authCode != null) {
+        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+          'widgets.$widgetId.google_auth_code': authCode
         });
-
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Tarefas do Google enviadas para a janela!')));
-      } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ Erro ao ler eventos da Google.')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Conta associada! A janela vai assumir as tarefas.')));
       }
     } catch (e) {
       debugPrint("Erro Sincronização Calendário: $e");
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ Erro de Segurança do Google (Verifica a chave SHA-1)')));
     }
   }
 
@@ -134,8 +87,8 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                 if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
                 var data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
-                double resW = (data['resW'] ?? 1024).toDouble();
-                double resH = (data['resH'] ?? 600).toDouble();
+                double resW = (data['resW'] is num) ? (data['resW'] as num).toDouble() : 1024.0;
+                double resH = (data['resH'] is num) ? (data['resH'] as num).toDouble() : 600.0;
                 double aspect = resW / resH;
                 Map<String, dynamic> widgetsData = data['widgets'] ?? {};
 
@@ -181,7 +134,6 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                                 double x = (wData['x'] ?? 0.5).toDouble();
                                 double y = (wData['y'] ?? 0.5).toDouble();
 
-                                // ATUALIZADO COM O CALENDÁRIO
                                 double wWidth = type == 'clock' ? 250 : type == 'weather' ? 200 : type == 'calendar' ? 310 : 220;
                                 double wHeight = type == 'gas' ? 80 : type == 'calendar' ? 250 : 120;
 
@@ -220,7 +172,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeOut,
                 height: 60,
-                width: _isMenuOpen ? 300 : 60, // Ligeiramente mais largo para caber mais 1 ícone
+                width: _isMenuOpen ? 300 : 60,
                 clipBehavior: Clip.hardEdge,
                 decoration: BoxDecoration(
                   color: Colors.blueAccent,
@@ -233,7 +185,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                   child: SizedBox(
                     width: _isMenuOpen ? 300 : 60, height: 60,
                     child: Row(
-                      mainAxisAlignment: _isMenuOpen ? MainAxisAlignment.spaceEvenly : MainAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
                         IconButton(
                           icon: Icon(_isMenuOpen ? Icons.close : Icons.add_circle_outline, color: Colors.white, size: 30),
@@ -243,7 +195,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                           _buildMenuDraggableIcon('clock', Icons.access_time),
                           _buildMenuDraggableIcon('weather', Icons.cloud),
                           _buildMenuDraggableIcon('gas', Icons.gas_meter),
-                          _buildMenuDraggableIcon('calendar', Icons.calendar_month), // <--- ADICIONADO O CALENDÁRIO AQUI
+                          _buildMenuDraggableIcon('calendar', Icons.calendar_month),
                         ]
                       ],
                     ),
@@ -271,9 +223,13 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     Map<String, dynamic> newData = {'type': type, 'x': x, 'y': y};
     if (type == 'clock') newData['timezone'] = 'Local';
     if (type == 'weather') newData['location'] = 'Lisboa';
-    if (type == 'calendar') newData['events'] = []; // Array vazio de início
+    if (type == 'calendar') newData['events'] = [];
 
     await FirebaseFirestore.instance.collection('windows').doc(widget.windowId).set({'widgets': {uniqueId: newData}}, SetOptions(merge: true));
+
+    if (type == 'calendar') {
+      Future.delayed(const Duration(milliseconds: 600), () => _syncCalendarWithGoogle(uniqueId));
+    }
   }
 
   Future<void> _updateWidgetPosition(String id, double x, double y) async {
@@ -285,16 +241,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Widget removido!')));
   }
 
-  Future<void> _updateWidgetSettings(String id, String field, String value) async {
-    await FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.$field': value});
-  }
-
-  // ==========================================
-  // MENU DE CONFIGURAÇÕES (Com Sincronização de Calendário)
-  // ==========================================
   void _openSettingsMenu(String id, String type, Map<String, dynamic> wData) {
-    if (type == 'gas') return;
-
     String selectedCity = wData['location'] ?? 'Lisboa, Portugal';
     TextEditingController searchController = TextEditingController();
     String selectedTimezoneKey = wData['timezone'] ?? 'Local';
@@ -315,43 +262,25 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                    "Configurar ${type == 'clock' ? 'Relógio' : type == 'weather' ? 'Meteorologia' : 'Calendário'}",
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)
-                ),
+                Text("Configurar ${type == 'clock' ? 'Relógio' : type == 'weather' ? 'Meteorologia' : 'Calendário'}", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
 
-                // --- CONFIG RELÓGIO ---
                 if (type == 'clock') ...[
-                  TextField(
-                    controller: searchController,
-                    decoration: InputDecoration(hintText: "Pesquisar Fuso Horário...", prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-                    onChanged: (value) => setModalState(() {}),
-                  ),
+                  TextField(controller: searchController, decoration: InputDecoration(hintText: "Pesquisar Fuso Horário...", prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))), onChanged: (value) => setModalState(() {})),
                   const SizedBox(height: 10),
                   Container(
-                    height: 200,
-                    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(10)),
+                    height: 200, decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(10)),
                     child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: filteredList.length,
-                      separatorBuilder: (context, index) => const Divider(height: 1),
+                      shrinkWrap: true, itemCount: filteredList.length, separatorBuilder: (context, index) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         String fusoKey = filteredList[index].key;
-                        String fusoNomePT = filteredList[index].value;
                         bool isSelected = selectedTimezoneKey == fusoKey;
-
-                        return ListTile(
-                          title: Text(fusoNomePT, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? Colors.blueAccent : Colors.black87)),
-                          trailing: isSelected ? const Icon(Icons.check, color: Colors.blueAccent) : null,
-                          onTap: () => setModalState(() => selectedTimezoneKey = fusoKey),
-                        );
+                        return ListTile(title: Text(filteredList[index].value, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? Colors.blueAccent : Colors.black87)), trailing: isSelected ? const Icon(Icons.check, color: Colors.blueAccent) : null, onTap: () => setModalState(() => selectedTimezoneKey = fusoKey));
                       },
                     ),
                   ),
                 ],
 
-                // --- CONFIG METEOROLOGIA ---
                 if (type == 'weather') ...[
                   Autocomplete<String>(
                     initialValue: TextEditingValue(text: selectedCity),
@@ -359,69 +288,47 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                       selectedCity = textEditingValue.text;
                       if (textEditingValue.text.length < 3) return const Iterable<String>.empty();
                       try {
-                        final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=${textEditingValue.text}&format=json&limit=5&featuretype=settlement');
-                        final response = await http.get(url, headers: {'User-Agent': 'VitraeViewApp'});
-                        if (response.statusCode == 200) {
-                          final List data = json.decode(response.body);
+                        final res = await http.get(Uri.parse('https://nominatim.openstreetmap.org/search?q=${textEditingValue.text}&format=json&limit=5&featuretype=settlement'), headers: {'User-Agent': 'VitraeViewApp'});
+                        if (res.statusCode == 200) {
+                          final List data = json.decode(res.body);
                           return data.map((item) {
                             String fullName = item['display_name'].toString();
                             List<String> parts = fullName.split(',');
-                            if (parts.length > 1) return "${parts.first.trim()}, ${parts.last.trim()}";
-                            return fullName;
+                            return parts.length > 1 ? "${parts.first.trim()}, ${parts.last.trim()}" : fullName;
                           }).toSet().toList();
                         }
-                      } catch (e) {
-                        debugPrint("Erro a procurar cidades: $e");
-                      }
+                      } catch (_) {}
                       return const Iterable<String>.empty();
                     },
                     onSelected: (String selection) => selectedCity = selection,
                     fieldViewBuilder: (context, tEController, focusNode, onFieldSubmitted) {
-                      return TextField(
-                        controller: tEController,
-                        focusNode: focusNode,
-                        decoration: InputDecoration(
-                            labelText: "Localidade",
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                            prefixIcon: const Icon(Icons.location_city)
-                        ),
-                        onChanged: (val) => selectedCity = val,
-                      );
+                      return TextField(controller: tEController, focusNode: focusNode, decoration: InputDecoration(labelText: "Localidade", border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)), prefixIcon: const Icon(Icons.location_city)), onChanged: (val) => selectedCity = val);
                     },
                   ),
                 ],
 
-                // --- CONFIG CALENDÁRIO ---
                 if (type == 'calendar') ...[
-                  const Text("Para mostrar os próximos 7 dias do seu calendário na janela, é necessário autorizar a sincronização com a Google.", style: TextStyle(color: Colors.grey, fontSize: 14)),
-                  const SizedBox(height: 20),
+                  const Text("As tarefas sincronizam de forma automática.", style: TextStyle(color: Colors.grey, fontSize: 14)),
+                  const SizedBox(height: 10),
                   ElevatedButton.icon(
                     onPressed: () {
-                      Navigator.pop(context); // Fecha o menu
-                      _syncCalendarWithGoogle(id); // Aciona o login e a busca
+                      Navigator.pop(context);
+                      _syncCalendarWithGoogle(id);
                     },
-                    icon: const Icon(Icons.sync),
-                    label: const Text("Sincronizar Tarefas da Google"),
-                    style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 50),
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black87,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.grey.shade300))
-                    ),
+                    icon: const Icon(Icons.sync), label: const Text("Forçar Login Google"),
+                    style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.white, foregroundColor: Colors.black87, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.grey.shade300))),
                   )
                 ],
 
-                // Botão Guardar para Clima e Relógio
                 if (type != 'calendar') ...[
                   const SizedBox(height: 20),
                   ElevatedButton(
                     onPressed: () {
-                      if (type == 'clock') _updateWidgetSettings(id, 'timezone', selectedTimezoneKey);
-                      if (type == 'weather') _updateWidgetSettings(id, 'location', selectedCity);
+                      if (type == 'clock') FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.timezone': selectedTimezoneKey});
+                      if (type == 'weather') FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.location': selectedCity});
                       Navigator.pop(context);
                     },
-                    style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.blueAccent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                    child: const Text("GUARDAR"),
+                    style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.blueAccent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text("GUARDAR"),
                   ),
                 ],
                 const SizedBox(height: 20),
@@ -435,23 +342,19 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
 
   Widget _buildWidgetDesign(String type, Map<String, dynamic> data) {
     if (type == 'clock') {
-      String nomeApresentacao = _fusosHorariosMap[data['timezone']] ?? data['timezone'] ?? 'Local';
       return Container(
-        decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(6)),
-        alignment: Alignment.center,
-        child: FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: const EdgeInsets.all(4.0), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.access_time, color: Colors.white, size: 24), const SizedBox(height: 2), Text(nomeApresentacao, style: const TextStyle(color: Colors.grey, fontSize: 10))]))),
+        decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(6)), alignment: Alignment.center,
+        child: FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: const EdgeInsets.all(4.0), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.access_time, color: Colors.white, size: 24), const SizedBox(height: 2), Text(_fusosHorariosMap[data['timezone']] ?? data['timezone'] ?? 'Local', style: const TextStyle(color: Colors.grey, fontSize: 10))]))),
       );
     } else if (type == 'weather') {
       return Container(
-        decoration: BoxDecoration(color: Colors.blueAccent.shade700, borderRadius: BorderRadius.circular(6)),
-        alignment: Alignment.center,
+        decoration: BoxDecoration(color: Colors.blueAccent.shade700, borderRadius: BorderRadius.circular(6)), alignment: Alignment.center,
         child: FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: const EdgeInsets.all(4.0), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.cloud, color: Colors.white, size: 24), const SizedBox(height: 2), Text(data['location'] ?? 'Lisboa', style: const TextStyle(color: Colors.white, fontSize: 10))]))),
       );
     } else if (type == 'calendar') {
       return Container(
-        decoration: BoxDecoration(color: Colors.deepPurple.shade700, borderRadius: BorderRadius.circular(6)),
-        alignment: Alignment.center,
-        child: const FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: EdgeInsets.all(4.0), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.calendar_month, color: Colors.white, size: 24), SizedBox(height: 2), Text("Calendário (Click p/ Sync)", style: TextStyle(color: Colors.white, fontSize: 10))]))),
+        decoration: BoxDecoration(color: Colors.deepPurple.shade700, borderRadius: BorderRadius.circular(6)), alignment: Alignment.center,
+        child: const FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: EdgeInsets.all(4.0), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.calendar_month, color: Colors.white, size: 24), SizedBox(height: 2), Text("Calendário Google", style: TextStyle(color: Colors.white, fontSize: 10))]))),
       );
     } else {
       return Container(decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(6)), alignment: Alignment.center, child: const FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: EdgeInsets.all(4.0), child: Text("GÁS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)))));
@@ -459,7 +362,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   }
 }
 
-// ... Mantém a tua classe SmartDraggable intacta abaixo disto ...
+// A LÓGICA DE ARRASTAR EXATA DO REPOSITÓRIO
 class SmartDraggable extends StatefulWidget {
   final double initialX, initialY, areaW, areaH, widgetW, widgetH;
   final Widget child;
@@ -538,9 +441,6 @@ class _SmartDraggableState extends State<SmartDraggable> {
             return;
           }
 
-          bool maxLeft = currentX <= 1.0 - (widget.widgetW / widget.areaW);
-          bool maxTop = currentY <= 1.0 - (widget.widgetH / widget.areaH);
-
           double snapX = currentX.clamp(0.0, 1.0 - (widget.widgetW / widget.areaW));
           double snapY = currentY.clamp(0.0, 1.0 - (widget.widgetH / widget.areaH));
 
@@ -549,7 +449,7 @@ class _SmartDraggableState extends State<SmartDraggable> {
               currentX = widget.initialX;
               currentY = widget.initialY;
             });
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Colisão! Regressando à posição original.")));
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Colisão!")));
           } else {
             setState(() {
               currentX = snapX;
