@@ -241,103 +241,213 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Widget removido!')));
   }
 
+  // ==========================================
+  // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
+  // ==========================================
+  // ==========================================
+  // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
+  // ==========================================
+  // ==========================================
+  // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
+  // ==========================================
   void _openSettingsMenu(String id, String type, Map<String, dynamic> wData) {
+    if (type == 'gas') return;
+
     String selectedCity = wData['location'] ?? 'Lisboa, Portugal';
     TextEditingController searchController = TextEditingController();
     String selectedTimezoneKey = wData['timezone'] ?? 'Local';
 
+    String calendarViewMode = wData['view_mode'] ?? 'Semana';
+    Color calendarBgColor = _hexToColor(wData['bg_color'] ?? '#1a1a1a');
+    Color calendarTitleColor = _hexToColor(wData['title_color'] ?? '#ffffff');
+    Color calendarTimeColor = _hexToColor(wData['time_color'] ?? '#3498db');
+
+    List<Color> colorPalette = [
+      const Color(0xFF1a1a1a), const Color(0xFF2b2b2b), const Color(0xFF2c3e50),
+      const Color(0xFF2980b9), const Color(0xFF8e44ad), const Color(0xFF27ae60),
+      const Color(0xFFc0392b), const Color(0xFFf39c12), const Color(0xFFffffff),
+      const Color(0xFFbdc3c7), const Color(0xFF3498db), const Color(0xFFe74c3c),
+    ];
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
       builder: (context) {
         return StatefulBuilder(builder: (context, setModalState) {
 
-          List<MapEntry<String, String>> filteredList = _fusosHorariosMap.entries
-              .where((entry) => entry.value.toLowerCase().contains(searchController.text.toLowerCase())).toList();
-
-          return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+          // NOVA LÓGICA: O botão agora envia a cor para a Firebase NA HORA!
+          Widget _buildColorPicker(String title, Color currentColor, String firebaseField, Function(Color) onColorSelected) {
+            return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Configurar ${type == 'clock' ? 'Relógio' : type == 'weather' ? 'Meteorologia' : 'Calendário'}", style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 20),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 10, runSpacing: 10,
+                  children: colorPalette.map((color) {
+                    bool isSelected = currentColor.value == color.value;
+                    return GestureDetector(
+                      onTap: () {
+                        setModalState(() => onColorSelected(color));
+                        // Atualiza na Firebase no exato momento do clique (Pré-visualização ao vivo!)
+                        String hexColor = '#${color.value.toRadixString(16).substring(2, 8)}';
+                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                          'widgets.$id.$firebaseField': hexColor,
+                        });
+                      },
+                      child: Container(
+                        width: 35, height: 35,
+                        decoration: BoxDecoration(
+                          color: color, shape: BoxShape.circle,
+                          border: Border.all(color: isSelected ? Colors.blueAccent : Colors.grey.shade300, width: isSelected ? 3 : 1),
+                        ),
+                        child: isSelected ? Icon(Icons.check, size: 20, color: color.computeLuminance() > 0.5 ? Colors.black : Colors.white) : null,
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            );
+          }
 
-                if (type == 'clock') ...[
-                  TextField(controller: searchController, decoration: InputDecoration(hintText: "Pesquisar Fuso Horário...", prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))), onChanged: (value) => setModalState(() {})),
-                  const SizedBox(height: 10),
-                  Container(
-                    height: 200, decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(10)),
-                    child: ListView.separated(
-                      shrinkWrap: true, itemCount: filteredList.length, separatorBuilder: (context, index) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        String fusoKey = filteredList[index].key;
-                        bool isSelected = selectedTimezoneKey == fusoKey;
-                        return ListTile(title: Text(filteredList[index].value, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? Colors.blueAccent : Colors.black87)), trailing: isSelected ? const Icon(Icons.check, color: Colors.blueAccent) : null, onTap: () => setModalState(() => selectedTimezoneKey = fusoKey));
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 20, left: 24, right: 24, top: 24),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          "Personalizar ${type == 'clock' ? 'Relógio' : type == 'weather' ? 'Meteorologia' : 'Calendário'}",
+                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      IconButton(
+                          icon: const Icon(Icons.close), padding: EdgeInsets.zero, constraints: const BoxConstraints(),
+                          onPressed: () => Navigator.pop(context)
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 30),
+
+                  if (type == 'weather') ...[
+                    Autocomplete<String>(
+                      initialValue: TextEditingValue(text: selectedCity),
+                      optionsBuilder: (TextEditingValue textEditingValue) async {
+                        selectedCity = textEditingValue.text;
+                        if (textEditingValue.text.length < 3) return const Iterable<String>.empty();
+                        try {
+                          final res = await http.get(Uri.parse('https://nominatim.openstreetmap.org/search?q=${textEditingValue.text}&format=json&limit=5&featuretype=settlement'), headers: {'User-Agent': 'VitraeViewApp'});
+                          if (res.statusCode == 200) {
+                            final List data = json.decode(res.body);
+                            return data.map((item) {
+                              String fullName = item['display_name'].toString();
+                              List<String> parts = fullName.split(',');
+                              return parts.length > 1 ? "${parts.first.trim()}, ${parts.last.trim()}" : fullName;
+                            }).toSet().toList();
+                          }
+                        } catch (_) {}
+                        return const Iterable<String>.empty();
+                      },
+                      onSelected: (String selection) => selectedCity = selection,
+                      fieldViewBuilder: (context, tEController, focusNode, onFieldSubmitted) {
+                        return TextField(controller: tEController, focusNode: focusNode, decoration: InputDecoration(labelText: "Localidade", border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)), prefixIcon: const Icon(Icons.location_city)), onChanged: (val) => selectedCity = val);
                       },
                     ),
-                  ),
-                ],
+                  ],
 
-                if (type == 'weather') ...[
-                  Autocomplete<String>(
-                    initialValue: TextEditingValue(text: selectedCity),
-                    optionsBuilder: (TextEditingValue textEditingValue) async {
-                      selectedCity = textEditingValue.text;
-                      if (textEditingValue.text.length < 3) return const Iterable<String>.empty();
-                      try {
-                        final res = await http.get(Uri.parse('https://nominatim.openstreetmap.org/search?q=${textEditingValue.text}&format=json&limit=5&featuretype=settlement'), headers: {'User-Agent': 'VitraeViewApp'});
-                        if (res.statusCode == 200) {
-                          final List data = json.decode(res.body);
-                          return data.map((item) {
-                            String fullName = item['display_name'].toString();
-                            List<String> parts = fullName.split(',');
-                            return parts.length > 1 ? "${parts.first.trim()}, ${parts.last.trim()}" : fullName;
-                          }).toSet().toList();
-                        }
-                      } catch (_) {}
-                      return const Iterable<String>.empty();
-                    },
-                    onSelected: (String selection) => selectedCity = selection,
-                    fieldViewBuilder: (context, tEController, focusNode, onFieldSubmitted) {
-                      return TextField(controller: tEController, focusNode: focusNode, decoration: InputDecoration(labelText: "Localidade", border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)), prefixIcon: const Icon(Icons.location_city)), onChanged: (val) => selectedCity = val);
-                    },
-                  ),
-                ],
+                  if (type == 'clock') ...[
+                    TextField(controller: searchController, decoration: InputDecoration(hintText: "Pesquisar Fuso Horário...", prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))), onChanged: (value) => setModalState(() {})),
+                    const SizedBox(height: 10),
+                    Container(
+                      height: 200, decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(10)),
+                      child: ListView.separated(
+                        shrinkWrap: true, itemCount: _fusosHorariosMap.entries.where((entry) => entry.value.toLowerCase().contains(searchController.text.toLowerCase())).length, separatorBuilder: (context, index) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          var filteredList = _fusosHorariosMap.entries.where((entry) => entry.value.toLowerCase().contains(searchController.text.toLowerCase())).toList();
+                          String fusoKey = filteredList[index].key;
+                          bool isSelected = selectedTimezoneKey == fusoKey;
+                          return ListTile(title: Text(filteredList[index].value, style: TextStyle(fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? Colors.blueAccent : Colors.black87)), trailing: isSelected ? const Icon(Icons.check, color: Colors.blueAccent) : null, onTap: () => setModalState(() => selectedTimezoneKey = fusoKey));
+                        },
+                      ),
+                    ),
+                  ],
 
-                if (type == 'calendar') ...[
-                  const Text("As tarefas sincronizam de forma automática.", style: TextStyle(color: Colors.grey, fontSize: 14)),
-                  const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _syncCalendarWithGoogle(id);
-                    },
-                    icon: const Icon(Icons.sync), label: const Text("Forçar Login Google"),
-                    style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.white, foregroundColor: Colors.black87, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.grey.shade300))),
-                  )
-                ],
+                  if (type == 'calendar') ...[
+                    const Text("Modo de Apresentação", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    const SizedBox(height: 8),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'Dia', label: Text('Dia')),
+                        ButtonSegment(value: 'Semana', label: Text('Semana')),
+                        ButtonSegment(value: 'Mês', label: Text('Mês')),
+                      ],
+                      selected: {calendarViewMode},
+                      onSelectionChanged: (Set<String> newSelection) {
+                        setModalState(() => calendarViewMode = newSelection.first);
+                        // Atualiza o modo de vista EM TEMPO REAL!
+                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                          'widgets.$id.view_mode': newSelection.first,
+                        });
+                      },
+                      style: ButtonStyle(
+                        backgroundColor: WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.selected) ? Colors.blueAccent : Colors.white),
+                        foregroundColor: WidgetStateProperty.resolveWith((states) => states.contains(WidgetState.selected) ? Colors.white : Colors.black87),
+                      ),
+                    ),
+                    const SizedBox(height: 25),
 
-                if (type != 'calendar') ...[
-                  const SizedBox(height: 20),
+                    _buildColorPicker("Cor de Fundo da Janela", calendarBgColor, "bg_color", (c) => calendarBgColor = c),
+                    const SizedBox(height: 20),
+                    _buildColorPicker("Cor do Título da Tarefa", calendarTitleColor, "title_color", (c) => calendarTitleColor = c),
+                    const SizedBox(height: 20),
+                    _buildColorPicker("Cor das Horas (Badge)", calendarTimeColor, "time_color", (c) => calendarTimeColor = c),
+                    const SizedBox(height: 25),
+
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _syncCalendarWithGoogle(id);
+                      },
+                      icon: const Icon(Icons.sync), label: const Text("Forçar Login Google"),
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 45), backgroundColor: Colors.white, foregroundColor: Colors.black87, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.grey.shade300))),
+                    )
+                  ],
+
+                  const SizedBox(height: 30),
+
                   ElevatedButton(
                     onPressed: () {
                       if (type == 'clock') FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.timezone': selectedTimezoneKey});
                       if (type == 'weather') FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.location': selectedCity});
+                      // Para o calendário não precisamos de fazer update aqui porque o live preview já salvou tudo!
                       Navigator.pop(context);
                     },
-                    style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.blueAccent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), child: const Text("GUARDAR"),
+                    style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(double.infinity, 55), backgroundColor: Colors.blueAccent, foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
+                    ),
+                    child: const Text("GUARDAR DEFINIÇÕES", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ],
-                const SizedBox(height: 20),
-              ],
+              ),
             ),
           );
         });
       },
     );
+  }
+
+  // Função auxiliar para converter strings hex em Colors do Flutter
+  Color _hexToColor(String code) {
+    return Color(int.parse(code.substring(1, 7), radix: 16) + 0xFF000000);
   }
 
   Widget _buildWidgetDesign(String type, Map<String, dynamic> data) {
