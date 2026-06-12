@@ -108,7 +108,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                           return;
                         }
 
-                        _addNewWidget(details.data, relX, relY);
+                        _addNewWidget(details.data, relX, relY, data);
                         setState(() => _isMenuOpen = false);
                       },
                       builder: (context, candidateData, rejectedData) {
@@ -134,8 +134,12 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                                 double x = (wData['x'] ?? 0.5).toDouble();
                                 double y = (wData['y'] ?? 0.5).toDouble();
 
-                                double wWidth = type == 'clock' ? 250 : type == 'weather' ? 200 : type == 'calendar' ? 310 : 220;
-                                double wHeight = type == 'gas' ? 80 : type == 'calendar' ? 250 : 120;
+                                // LÊ A ESCALA DA FIREBASE (Default 1.0 = 100%)
+                                double scale = (wData['scale'] ?? 1.0).toDouble();
+
+                                // APLICA A ESCALA AOS TAMANHOS ORIGINAIS
+                                double wWidth = (type == 'clock' ? 250 : type == 'weather' ? 200 : type == 'calendar' ? 310 : 220) * scale;
+                                double wHeight = (type == 'gas' ? 80 : type == 'calendar' ? 250 : 120) * scale;
 
                                 renderedWidgets.add(
                                   SmartDraggable(
@@ -218,12 +222,25 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     );
   }
 
-  Future<void> _addNewWidget(String type, double x, double y) async {
+  Future<void> _addNewWidget(String type, double x, double y, Map<String, dynamic> docData) async {
     String uniqueId = "${type}_${DateTime.now().millisecondsSinceEpoch}";
     Map<String, dynamic> newData = {'type': type, 'x': x, 'y': y};
+
     if (type == 'clock') newData['timezone'] = 'Local';
     if (type == 'weather') newData['location'] = 'Lisboa';
-    if (type == 'calendar') newData['events'] = [];
+
+    if (type == 'calendar') {
+      newData['events'] = [];
+      // HERDA AS PREFERÊNCIAS GLOBAIS SE ELAS EXISTIREM!
+      if (docData.containsKey('calendar_prefs')) {
+        var prefs = docData['calendar_prefs'];
+        newData['bg_color'] = prefs['bg_color'] ?? '#1a1a1a';
+        newData['title_color'] = prefs['title_color'] ?? '#ffffff';
+        newData['time_color'] = prefs['time_color'] ?? '#3498db';
+        newData['view_mode'] = prefs['view_mode'] ?? 'Semana';
+        newData['scale'] = prefs['scale'] ?? 1.0;
+      }
+    }
 
     await FirebaseFirestore.instance.collection('windows').doc(widget.windowId).set({'widgets': {uniqueId: newData}}, SetOptions(merge: true));
 
@@ -250,17 +267,33 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   // ==========================================
   // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
   // ==========================================
+  // ==========================================
+  // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
+  // ==========================================
+  // ==========================================
+  // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
+  // ==========================================
   void _openSettingsMenu(String id, String type, Map<String, dynamic> wData) {
     if (type == 'gas') return;
+
+    // --- 1. GUARDAR OS VALORES ORIGINAIS NA MEMÓRIA ---
+    // (Para podermos reverter a janela caso o utilizador feche sem guardar)
+    String originalViewMode = wData['view_mode'] ?? 'Semana';
+    String originalBgColor = wData['bg_color'] ?? '#1a1a1a';
+    String originalTitleColor = wData['title_color'] ?? '#ffffff';
+    String originalTimeColor = wData['time_color'] ?? '#3498db';
+    double originalScale = (wData['scale'] ?? 1.0).toDouble();
+
+    // --- 2. VARIÁVEIS DE ESTADO DO MENU ---
+    double widgetScale = originalScale;
+    String calendarViewMode = originalViewMode;
+    Color calendarBgColor = _hexToColor(originalBgColor);
+    Color calendarTitleColor = _hexToColor(originalTitleColor);
+    Color calendarTimeColor = _hexToColor(originalTimeColor);
 
     String selectedCity = wData['location'] ?? 'Lisboa, Portugal';
     TextEditingController searchController = TextEditingController();
     String selectedTimezoneKey = wData['timezone'] ?? 'Local';
-
-    String calendarViewMode = wData['view_mode'] ?? 'Semana';
-    Color calendarBgColor = _hexToColor(wData['bg_color'] ?? '#1a1a1a');
-    Color calendarTitleColor = _hexToColor(wData['title_color'] ?? '#ffffff');
-    Color calendarTimeColor = _hexToColor(wData['time_color'] ?? '#3498db');
 
     List<Color> colorPalette = [
       const Color(0xFF1a1a1a), const Color(0xFF2b2b2b), const Color(0xFF2c3e50),
@@ -277,7 +310,6 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
       builder: (context) {
         return StatefulBuilder(builder: (context, setModalState) {
 
-          // NOVA LÓGICA: O botão agora envia a cor para a Firebase NA HORA!
           Widget _buildColorPicker(String title, Color currentColor, String firebaseField, Function(Color) onColorSelected) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -291,7 +323,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                     return GestureDetector(
                       onTap: () {
                         setModalState(() => onColorSelected(color));
-                        // Atualiza na Firebase no exato momento do clique (Pré-visualização ao vivo!)
+                        // ATUALIZAÇÃO EM TEMPO REAL NA JANELA (Live Preview)
                         String hexColor = '#${color.value.toRadixString(16).substring(2, 8)}';
                         FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
                           'widgets.$id.$firebaseField': hexColor,
@@ -331,7 +363,19 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                       ),
                       IconButton(
                           icon: const Icon(Icons.close), padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                          onPressed: () => Navigator.pop(context)
+                          onPressed: () {
+                            // SE CANCELAR NA CRUZ (X), REVERTE A JANELA PARA O ORIGINAL
+                            if (type == 'calendar') {
+                              FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                                'widgets.$id.view_mode': originalViewMode,
+                                'widgets.$id.bg_color': originalBgColor,
+                                'widgets.$id.title_color': originalTitleColor,
+                                'widgets.$id.time_color': originalTimeColor,
+                                'widgets.$id.scale': originalScale,
+                              });
+                            }
+                            Navigator.pop(context);
+                          }
                       ),
                     ],
                   ),
@@ -392,7 +436,6 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                       selected: {calendarViewMode},
                       onSelectionChanged: (Set<String> newSelection) {
                         setModalState(() => calendarViewMode = newSelection.first);
-                        // Atualiza o modo de vista EM TEMPO REAL!
                         FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
                           'widgets.$id.view_mode': newSelection.first,
                         });
@@ -421,13 +464,55 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                     )
                   ],
 
-                  const SizedBox(height: 30),
+                  // --- SLIDER DE TAMANHO (ESCALA) ---
+                  const Divider(height: 30),
+                  const Text("Tamanho do Widget", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  Slider(
+                    value: widgetScale.clamp(0.7, 1.5),
+                    min: 0.7,
+                    max: 1.5,
+                    divisions: 8,
+                    activeColor: Colors.blueAccent,
+                    label: "${(widgetScale * 100).toInt()}%",
+                    onChanged: (val) {
+                      setModalState(() => widgetScale = val);
+                      FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                        'widgets.$id.scale': val,
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 20),
 
+                  // BOTÃO GRAVAR GERAL
                   ElevatedButton(
                     onPressed: () {
-                      if (type == 'clock') FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.timezone': selectedTimezoneKey});
-                      if (type == 'weather') FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.location': selectedCity});
-                      // Para o calendário não precisamos de fazer update aqui porque o live preview já salvou tudo!
+                      if (type == 'clock') {
+                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.timezone': selectedTimezoneKey});
+                      }
+                      if (type == 'weather') {
+                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.location': selectedCity});
+                      }
+                      if (type == 'calendar') {
+                        String hexBg = '#${calendarBgColor.value.toRadixString(16).substring(2, 8)}';
+                        String hexTitle = '#${calendarTitleColor.value.toRadixString(16).substring(2, 8)}';
+                        String hexTime = '#${calendarTimeColor.value.toRadixString(16).substring(2, 8)}';
+
+                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                          'widgets.$id.view_mode': calendarViewMode,
+                          'widgets.$id.bg_color': hexBg,
+                          'widgets.$id.title_color': hexTitle,
+                          'widgets.$id.time_color': hexTime,
+
+                          // --- MAGIA: GRAVA ESTAS CORES GLOBALMENTE PARA FUTUROS CALENDÁRIOS ---
+                          'calendar_prefs': {
+                            'bg_color': hexBg,
+                            'title_color': hexTitle,
+                            'time_color': hexTime,
+                            'view_mode': calendarViewMode,
+                            'scale': widgetScale,
+                          }
+                        });
+                      }
                       Navigator.pop(context);
                     },
                     style: ElevatedButton.styleFrom(
@@ -507,8 +592,15 @@ class _SmartDraggableState extends State<SmartDraggable> {
   void didUpdateWidget(SmartDraggable oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!isDragging) {
-      currentX = widget.initialX;
-      currentY = widget.initialY;
+      // MAGIA 1: Se aumentares a escala no menu e ele estiver encostado à direita,
+      // o Flutter empurra-o automaticamente para dentro para não ser cortado!
+      double maxAllowedX = 1.0 - (widget.widgetW / widget.areaW);
+      double maxAllowedY = 1.0 - (widget.widgetH / widget.areaH);
+      maxAllowedX = maxAllowedX < 0.0 ? 0.0 : maxAllowedX;
+      maxAllowedY = maxAllowedY < 0.0 ? 0.0 : maxAllowedY;
+
+      currentX = widget.initialX.clamp(0.0, maxAllowedX);
+      currentY = widget.initialY.clamp(0.0, maxAllowedY);
     }
   }
 
@@ -551,13 +643,22 @@ class _SmartDraggableState extends State<SmartDraggable> {
             return;
           }
 
-          double snapX = currentX.clamp(0.0, 1.0 - (widget.widgetW / widget.areaW));
-          double snapY = currentY.clamp(0.0, 1.0 - (widget.widgetH / widget.areaH));
+          // MAGIA 2: Cálculo blindado das margens ao largar o widget arrastado
+          double maxAllowedX = 1.0 - (widget.widgetW / widget.areaW);
+          double maxAllowedY = 1.0 - (widget.widgetH / widget.areaH);
+
+          // Previne limites matemáticos negativos que causam bugs no .clamp()
+          maxAllowedX = maxAllowedX < 0.0 ? 0.0 : maxAllowedX;
+          maxAllowedY = maxAllowedY < 0.0 ? 0.0 : maxAllowedY;
+
+          double snapX = currentX.clamp(0.0, maxAllowedX);
+          double snapY = currentY.clamp(0.0, maxAllowedY);
 
           if (widget.onCheckOverlap(snapX, snapY)) {
             setState(() {
-              currentX = widget.initialX;
-              currentY = widget.initialY;
+              // Se colidir, volta para a posição inicial (também blindada)
+              currentX = widget.initialX.clamp(0.0, maxAllowedX);
+              currentY = widget.initialY.clamp(0.0, maxAllowedY);
             });
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Colisão!")));
           } else {
