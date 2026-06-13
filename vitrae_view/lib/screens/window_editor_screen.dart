@@ -20,10 +20,43 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   final Map<String, String> _fusosHorariosMap = {
     'Local': 'Hora Local do Sistema',
     'UTC': 'Tempo Universal (UTC)',
+
+    // Europa
     'Europe/Lisbon': 'Europa / Lisboa',
     'Europe/London': 'Europa / Londres',
+    'Europe/Madrid': 'Europa / Madrid',
+    'Europe/Paris': 'Europa / Paris',
+    'Europe/Berlin': 'Europa / Berlim',
+    'Europe/Rome': 'Europa / Roma',
+    'Europe/Zurich': 'Europa / Zurique',
+    'Europe/Moscow': 'Europa / Moscovo',
+
+    // Américas
     'America/New_York': 'América / Nova Iorque',
+    'America/Chicago': 'América / Chicago',
+    'America/Los_Angeles': 'América / Los Angeles',
+    'America/Toronto': 'América / Toronto',
+    'America/Sao_Paulo': 'América / São Paulo',
+    'America/Argentina/Buenos_Aires': 'América / Buenos Aires',
+    'America/Bogota': 'América / Bogotá',
+
+    // Ásia e Pacífico
     'Asia/Tokyo': 'Ásia / Tóquio',
+    'Asia/Shanghai': 'Ásia / Xangai',
+    'Asia/Hong_Kong': 'Ásia / Hong Kong',
+    'Asia/Seoul': 'Ásia / Seul',
+    'Asia/Dubai': 'Ásia / Dubai',
+    'Asia/Singapore': 'Ásia / Singapura',
+    'Asia/Kolkata': 'Ásia / Nova Deli (Índia)',
+    'Australia/Sydney': 'Austrália / Sidney',
+    'Pacific/Auckland': 'Pacífico / Auckland',
+
+    // África e CPLP
+    'Africa/Luanda': 'África / Luanda (Angola)',
+    'Africa/Maputo': 'África / Maputo (Moçambique)',
+    'Africa/Johannesburg': 'África / Joanesburgo',
+    'Africa/Cairo': 'África / Cairo',
+    'Atlantic/Cape_Verde': 'Atlântico / Cabo Verde',
   };
 
   bool _hasOverlap(String skipId, double testX, double testY, String testType, Map<String, dynamic> widgetsData, double resW, double resH) {
@@ -510,7 +543,16 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                   ElevatedButton(
                     onPressed: () {
                       if (type == 'clock') {
-                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.timezone': selectedTimezoneKey});
+                        // Extrai apenas o nome da cidade (ex: de "Europa / Nova Iorque" tira só "Nova Iorque")
+                        String displayName = _fusosHorariosMap[selectedTimezoneKey] ?? 'Local';
+                        if (displayName.contains(' / ')) {
+                          displayName = displayName.split(' / ').last;
+                        }
+
+                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                          'widgets.$id.timezone': selectedTimezoneKey,
+                          'widgets.$id.tz_name': displayName, // Guarda o nome limpo e em Português!
+                        });
                       }
                       if (type == 'weather') {
                         FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
