@@ -227,7 +227,11 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     Map<String, dynamic> newData = {'type': type, 'x': x, 'y': y};
 
     if (type == 'clock') newData['timezone'] = 'Local';
-    if (type == 'weather') newData['location'] = 'Lisboa';
+    if (type == 'weather') {
+      newData['location'] = 'Lisboa, Portugal';
+      newData['lat'] = '38.7071';
+      newData['lon'] = '-9.1355';
+    }
 
     if (type == 'calendar') {
       newData['events'] = [];
@@ -292,6 +296,9 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     Color calendarTimeColor = _hexToColor(originalTimeColor);
 
     String selectedCity = wData['location'] ?? 'Lisboa, Portugal';
+    String selectedLat = wData['lat']?.toString() ?? '38.7071';
+    String selectedLon = wData['lon']?.toString() ?? '-9.1355';
+    Map<String, Map<String, String>> tempCityCoords = {};
     TextEditingController searchController = TextEditingController();
     String selectedTimezoneKey = wData['timezone'] ?? 'Local';
 
@@ -385,22 +392,38 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                     Autocomplete<String>(
                       initialValue: TextEditingValue(text: selectedCity),
                       optionsBuilder: (TextEditingValue textEditingValue) async {
-                        selectedCity = textEditingValue.text;
                         if (textEditingValue.text.length < 3) return const Iterable<String>.empty();
                         try {
                           final res = await http.get(Uri.parse('https://nominatim.openstreetmap.org/search?q=${textEditingValue.text}&format=json&limit=5&featuretype=settlement'), headers: {'User-Agent': 'VitraeViewApp'});
                           if (res.statusCode == 200) {
                             final List data = json.decode(res.body);
-                            return data.map((item) {
+                            List<String> results = [];
+
+                            for (var item in data) {
                               String fullName = item['display_name'].toString();
                               List<String> parts = fullName.split(',');
-                              return parts.length > 1 ? "${parts.first.trim()}, ${parts.last.trim()}" : fullName;
-                            }).toSet().toList();
+                              String displayName = parts.length > 1 ? "${parts.first.trim()}, ${parts.last.trim()}" : fullName;
+                              results.add(displayName);
+
+                              // MAGIA: Guarda a latitude e longitude secretamente associadas ao nome!
+                              tempCityCoords[displayName] = {
+                                'lat': item['lat'].toString(),
+                                'lon': item['lon'].toString()
+                              };
+                            }
+                            return results.toSet().toList();
                           }
                         } catch (_) {}
                         return const Iterable<String>.empty();
                       },
-                      onSelected: (String selection) => selectedCity = selection,
+                      onSelected: (String selection) {
+                        selectedCity = selection;
+                        // Quando tocas na cidade, a app rouba as coordenadas que estavam escondidas
+                        if (tempCityCoords.containsKey(selection)) {
+                          selectedLat = tempCityCoords[selection]!['lat']!;
+                          selectedLon = tempCityCoords[selection]!['lon']!;
+                        }
+                      },
                       fieldViewBuilder: (context, tEController, focusNode, onFieldSubmitted) {
                         return TextField(controller: tEController, focusNode: focusNode, decoration: InputDecoration(labelText: "Localidade", border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)), prefixIcon: const Icon(Icons.location_city)), onChanged: (val) => selectedCity = val);
                       },
@@ -490,7 +513,11 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                         FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.timezone': selectedTimezoneKey});
                       }
                       if (type == 'weather') {
-                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({'widgets.$id.location': selectedCity});
+                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                          'widgets.$id.location': selectedCity,
+                          'widgets.$id.lat': selectedLat,
+                          'widgets.$id.lon': selectedLon,
+                        });
                       }
                       if (type == 'calendar') {
                         String hexBg = '#${calendarBgColor.value.toRadixString(16).substring(2, 8)}';
@@ -592,15 +619,17 @@ class _SmartDraggableState extends State<SmartDraggable> {
   void didUpdateWidget(SmartDraggable oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!isDragging) {
-      // MAGIA 1: Se aumentares a escala no menu e ele estiver encostado à direita,
-      // o Flutter empurra-o automaticamente para dentro para não ser cortado!
-      double maxAllowedX = 1.0 - (widget.widgetW / widget.areaW);
-      double maxAllowedY = 1.0 - (widget.widgetH / widget.areaH);
-      maxAllowedX = maxAllowedX < 0.0 ? 0.0 : maxAllowedX;
-      maxAllowedY = maxAllowedY < 0.0 ? 0.0 : maxAllowedY;
+      // Cria uma margem visual de ~2% no telemóvel
+      double marginX = 0.02;
+      double marginY = 0.02;
 
-      currentX = widget.initialX.clamp(0.0, maxAllowedX);
-      currentY = widget.initialY.clamp(0.0, maxAllowedY);
+      double maxAllowedX = 1.0 - (widget.widgetW / widget.areaW) - marginX;
+      double maxAllowedY = 1.0 - (widget.widgetH / widget.areaH) - marginY;
+      maxAllowedX = maxAllowedX < marginX ? marginX : maxAllowedX;
+      maxAllowedY = maxAllowedY < marginY ? marginY : maxAllowedY;
+
+      currentX = widget.initialX.clamp(marginX, maxAllowedX);
+      currentY = widget.initialY.clamp(marginY, maxAllowedY);
     }
   }
 
@@ -643,22 +672,23 @@ class _SmartDraggableState extends State<SmartDraggable> {
             return;
           }
 
-          // MAGIA 2: Cálculo blindado das margens ao largar o widget arrastado
-          double maxAllowedX = 1.0 - (widget.widgetW / widget.areaW);
-          double maxAllowedY = 1.0 - (widget.widgetH / widget.areaH);
+          // APLICA A MARGEM FÍSICA AO LARGAR O DEDO
+          double marginX = 0.02; // Parede invisível de 2%
+          double marginY = 0.02;
 
-          // Previne limites matemáticos negativos que causam bugs no .clamp()
-          maxAllowedX = maxAllowedX < 0.0 ? 0.0 : maxAllowedX;
-          maxAllowedY = maxAllowedY < 0.0 ? 0.0 : maxAllowedY;
+          double maxAllowedX = 1.0 - (widget.widgetW / widget.areaW) - marginX;
+          double maxAllowedY = 1.0 - (widget.widgetH / widget.areaH) - marginY;
 
-          double snapX = currentX.clamp(0.0, maxAllowedX);
-          double snapY = currentY.clamp(0.0, maxAllowedY);
+          maxAllowedX = maxAllowedX < marginX ? marginX : maxAllowedX;
+          maxAllowedY = maxAllowedY < marginY ? marginY : maxAllowedY;
+
+          double snapX = currentX.clamp(marginX, maxAllowedX);
+          double snapY = currentY.clamp(marginY, maxAllowedY);
 
           if (widget.onCheckOverlap(snapX, snapY)) {
             setState(() {
-              // Se colidir, volta para a posição inicial (também blindada)
-              currentX = widget.initialX.clamp(0.0, maxAllowedX);
-              currentY = widget.initialY.clamp(0.0, maxAllowedY);
+              currentX = widget.initialX.clamp(marginX, maxAllowedX);
+              currentY = widget.initialY.clamp(marginY, maxAllowedY);
             });
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Colisão!")));
           } else {
