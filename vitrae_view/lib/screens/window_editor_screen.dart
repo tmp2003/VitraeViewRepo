@@ -19,6 +19,9 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   bool _isMenuOpen = false;
   final GlobalKey _windowKey = GlobalKey();
 
+  // NOVA VARIÁVEL: Lembra se o aviso já foi mostrado nesta sessão
+  bool _hasShownLandscapeWarning = false;
+
   final Map<String, String> _fusosHorariosMap = {
     'Local': 'Hora Local do Sistema',
     'UTC': 'Tempo Universal (UTC)',
@@ -109,142 +112,187 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 1. O Flutter descobre em tempo real se o telemóvel está deitado ou em pé
+    bool isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    // 2. Preparamos os ícones do menu para não repetir código
+    List<Widget> menuItems = [
+      IconButton(
+        icon: Icon(_isMenuOpen ? Icons.close : Icons.add_circle_outline, color: Colors.white, size: 30),
+        onPressed: () => setState(() => _isMenuOpen = !_isMenuOpen),
+      ),
+      if (_isMenuOpen) ...[
+        _buildMenuDraggableIcon('clock', Icons.access_time),
+        _buildMenuDraggableIcon('weather', Icons.cloud),
+        _buildMenuDraggableIcon('gas', Icons.gas_meter),
+        _buildMenuDraggableIcon('calendar', Icons.calendar_month),
+        _buildMenuDraggableIcon('photo', Icons.image),
+      ]
+    ];
+
     return Scaffold(
       backgroundColor: Colors.grey.shade900,
-      appBar: AppBar(title: Text("Configurar Layout: ${widget.windowId}")),
-      body: Stack(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(40.0),
-            child: StreamBuilder<DocumentSnapshot>(
-              stream: FirebaseFirestore.instance.collection('windows').doc(widget.windowId).snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      // 3. SE ESTIVER DEITADO (Paisagem), ESCONDE A APP BAR INTEIRA!
+      appBar: isLandscape ? null : AppBar(title: Text("Configurar Layout: ${widget.windowId}")),
 
-                var data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
-                double resW = (data['resW'] is num) ? (data['resW'] as num).toDouble() : 1024.0;
-                double resH = (data['resH'] is num) ? (data['resH'] as num).toDouble() : 600.0;
-                double aspect = resW / resH;
-                Map<String, dynamic> widgetsData = data['widgets'] ?? {};
+      // O SafeArea garante que o menu não fica escondido atrás da câmara/notch do telemóvel
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // --- A NOSSA TELA BRANCA ---
+            Padding(
+              // 4. MUDANÇA DE MARGENS:
+              // Em Paisagem: Só tem margem grande à esquerda para não chocar com o menu.
+              // Em Retrato: Tem margem grande em cima para não chocar com o menu horizontal.
+              padding: isLandscape
+                  ? const EdgeInsets.only(top: 10.0, bottom: 10.0, left: 90.0, right: 10.0)
+                  : const EdgeInsets.only(top: 100.0, bottom: 20.0, left: 20.0, right: 20.0),
+              child: StreamBuilder<DocumentSnapshot>(
+                stream: FirebaseFirestore.instance.collection('windows').doc(widget.windowId).snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-                return Center(
-                  child: AspectRatio(
-                    aspectRatio: aspect,
-                    child: DragTarget<String>(
-                      onAcceptWithDetails: (details) {
-                        final RenderBox renderBox = _windowKey.currentContext!.findRenderObject() as RenderBox;
-                        final localPosition = renderBox.globalToLocal(details.offset);
+                  var data = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+                  double resW = (data['resW'] is num) ? (data['resW'] as num).toDouble() : 1024.0;
+                  double resH = (data['resH'] is num) ? (data['resH'] as num).toDouble() : 600.0;
+                  double aspect = resW / resH;
+                  Map<String, dynamic> widgetsData = data['widgets'] ?? {};
 
-                        double relX = (localPosition.dx / renderBox.size.width).clamp(0.0, 1.0);
-                        double relY = (localPosition.dy / renderBox.size.height).clamp(0.0, 1.0);
-
-                        if (_hasOverlap('novo', relX, relY, details.data, widgetsData, resW, resH)) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Espaço ocupado! Mova para uma zona livre.")));
-                          return;
-                        }
-
-                        _addNewWidget(details.data, relX, relY, data);
-                        setState(() => _isMenuOpen = false);
-                      },
-                      builder: (context, candidateData, rejectedData) {
-                        return Container(
-                          key: _windowKey,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: candidateData.isNotEmpty ? Colors.green : Colors.blueAccent, width: 3),
-                            boxShadow: [BoxShadow(color: Colors.blueAccent.withOpacity(0.2), blurRadius: 30, spreadRadius: 5)],
-                          ),
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final double areaW = constraints.maxWidth;
-                              final double areaH = constraints.maxHeight;
-                              double scaleX = areaW / resW;
-                              double scaleY = areaH / resH;
-
-                              List<Widget> renderedWidgets = [];
-
-                              widgetsData.forEach((widgetId, wData) {
-                                String type = wData['type'];
-                                double x = (wData['x'] ?? 0.5).toDouble();
-                                double y = (wData['y'] ?? 0.5).toDouble();
-
-                                // LÊ A ESCALA DA FIREBASE (Default 1.0 = 100%)
-                                double scale = (wData['scale'] ?? 1.0).toDouble();
-
-                                // APLICA A ESCALA AOS TAMANHOS ORIGINAIS
-                                double wWidth = (type == 'clock' ? 250 : type == 'weather' ? 200 : type == 'calendar' ? 310 : type == 'photo' ? 300 : 220) * scale;
-                                double wHeight = (type == 'gas' ? 80 : type == 'calendar' ? 250 : type == 'photo' ? 300 : 120) * scale;
-
-                                renderedWidgets.add(
-                                  SmartDraggable(
-                                    key: ValueKey(widgetId),
-                                    initialX: x, initialY: y,
-                                    areaW: areaW, areaH: areaH,
-                                    widgetW: wWidth * scaleX, widgetH: wHeight * scaleY,
-                                    child: _buildWidgetDesign(type, wData),
-                                    onCheckOverlap: (nx, ny) => _hasOverlap(widgetId, nx, ny, type, widgetsData, resW, resH),
-                                    onSave: (nx, ny) => _updateWidgetPosition(widgetId, nx, ny),
-                                    onDelete: () => _deleteWidget(widgetId),
-                                    onEdit: () => _openSettingsMenu(widgetId, type, wData),
-                                  ),
-                                );
-                              });
-
-                              return Stack(clipBehavior: Clip.none, children: renderedWidgets);
-                            },
+                  // O TEU AVISO DE ROTAÇÃO MANTÉM-SE AQUI INTACTO
+                  if (aspect > 1.0 && MediaQuery.of(context).orientation == Orientation.portrait && !_hasShownLandscapeWarning) {
+                    _hasShownLandscapeWarning = true;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: const Row(
+                              children: [
+                                Icon(Icons.screen_rotation, color: Colors.white),
+                                SizedBox(width: 12),
+                                Expanded(child: Text("Dica: Rode o telemóvel (Modo Paisagem) para ter mais espaço de edição nesta janela!", style: TextStyle(fontSize: 14))),
+                              ],
+                            ),
+                            duration: const Duration(seconds: 6),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor: Colors.blueAccent.shade700,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                         );
-                      },
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+                      }
+                    });
+                  }
 
-          Positioned(
-            top: 20, left: 0, right: 0,
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOut,
-                height: 60,
-                width: _isMenuOpen ? 300 : 60,
-                clipBehavior: Clip.hardEdge,
-                decoration: BoxDecoration(
-                  color: Colors.blueAccent,
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 5))],
-                ),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const NeverScrollableScrollPhysics(),
-                  child: SizedBox(
-                    width: _isMenuOpen ? 300 : 60, height: 60,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        IconButton(
-                          icon: Icon(_isMenuOpen ? Icons.close : Icons.add_circle_outline, color: Colors.white, size: 30),
-                          onPressed: () => setState(() => _isMenuOpen = !_isMenuOpen),
-                        ),
-                        if (_isMenuOpen) ...[
-                          _buildMenuDraggableIcon('clock', Icons.access_time),
-                          _buildMenuDraggableIcon('weather', Icons.cloud),
-                          _buildMenuDraggableIcon('gas', Icons.gas_meter),
-                          _buildMenuDraggableIcon('calendar', Icons.calendar_month),
-                          _buildMenuDraggableIcon('photo', Icons.image),
-                        ]
-                      ],
+                  return Center(
+                    child: AspectRatio(
+                      aspectRatio: aspect,
+                      child: DragTarget<String>(
+                        onAcceptWithDetails: (details) {
+                          final RenderBox renderBox = _windowKey.currentContext!.findRenderObject() as RenderBox;
+                          final localPosition = renderBox.globalToLocal(details.offset);
+
+                          double relX = (localPosition.dx / renderBox.size.width).clamp(0.0, 1.0);
+                          double relY = (localPosition.dy / renderBox.size.height).clamp(0.0, 1.0);
+
+                          if (_hasOverlap('novo', relX, relY, details.data, widgetsData, resW, resH)) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Espaço ocupado! Mova para uma zona livre.")));
+                            return;
+                          }
+
+                          _addNewWidget(details.data, relX, relY, data);
+                          setState(() => _isMenuOpen = false);
+                        },
+                        builder: (context, candidateData, rejectedData) {
+                          return Container(
+                            key: _windowKey,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: candidateData.isNotEmpty ? Colors.green : Colors.blueAccent, width: 3),
+                              boxShadow: [BoxShadow(color: Colors.blueAccent.withOpacity(0.2), blurRadius: 30, spreadRadius: 5)],
+                            ),
+                            child: LayoutBuilder(
+                              builder: (context, constraints) {
+                                final double areaW = constraints.maxWidth;
+                                final double areaH = constraints.maxHeight;
+                                double scaleX = areaW / resW;
+                                double scaleY = areaH / resH;
+
+                                List<Widget> renderedWidgets = [];
+
+                                widgetsData.forEach((widgetId, wData) {
+                                  String type = wData['type'];
+                                  double x = (wData['x'] ?? 0.5).toDouble();
+                                  double y = (wData['y'] ?? 0.5).toDouble();
+
+                                  double scale = (wData['scale'] ?? 1.0).toDouble();
+
+                                  double wWidth = (type == 'clock' ? 250 : type == 'weather' ? 200 : type == 'calendar' ? 310 : type == 'photo' ? 300 : 220) * scale;
+                                  double wHeight = (type == 'gas' ? 80 : type == 'calendar' ? 250 : type == 'photo' ? 300 : 120) * scale;
+
+                                  renderedWidgets.add(
+                                    SmartDraggable(
+                                      key: ValueKey(widgetId),
+                                      initialX: x, initialY: y,
+                                      areaW: areaW, areaH: areaH,
+                                      widgetW: wWidth * scaleX, widgetH: wHeight * scaleY,
+                                      child: _buildWidgetDesign(type, wData),
+                                      onCheckOverlap: (nx, ny) => _hasOverlap(widgetId, nx, ny, type, widgetsData, resW, resH),
+                                      onSave: (nx, ny) => _updateWidgetPosition(widgetId, nx, ny),
+                                      onDelete: () => _deleteWidget(widgetId),
+                                      onEdit: () => _openSettingsMenu(widgetId, type, wData),
+                                    ),
+                                  );
+                                });
+
+                                return Stack(clipBehavior: Clip.none, children: renderedWidgets);
+                              },
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+            // --- MENU DE WIDGETS RESPONSIVO ---
+            Positioned(
+              top: isLandscape ? 0 : 20,
+              bottom: isLandscape ? 0 : null,
+              left: isLandscape ? 20 : 0,
+              right: isLandscape ? null : 0,
+              child: Align(
+                // Se paisagem, fica centrado à esquerda. Se retrato, fica no topo!
+                alignment: isLandscape ? Alignment.centerLeft : Alignment.topCenter,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOut,
+                  // O contentor inverte as medidas consoante a orientação
+                  height: isLandscape ? (_isMenuOpen ? 340 : 60) : 60,
+                  width: isLandscape ? 60 : (_isMenuOpen ? 340 : 60),
+                  clipBehavior: Clip.hardEdge,
+                  decoration: BoxDecoration(
+                    color: Colors.blueAccent,
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 10, offset: Offset(0, 5))],
+                  ),
+                  child: SingleChildScrollView(
+                    scrollDirection: isLandscape ? Axis.vertical : Axis.horizontal,
+                    physics: const NeverScrollableScrollPhysics(),
+                    child: SizedBox(
+                      width: isLandscape ? 60 : (_isMenuOpen ? 340 : 60),
+                      height: isLandscape ? (_isMenuOpen ? 340 : 60) : 60,
+                      child: isLandscape
+                          ? Column(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: menuItems)
+                          : Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: menuItems),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
