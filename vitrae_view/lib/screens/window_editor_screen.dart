@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:image_picker/image_picker.dart';
+
 
 class WindowEditorScreen extends StatefulWidget {
   final String windowId;
@@ -60,8 +62,8 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   };
 
   bool _hasOverlap(String skipId, double testX, double testY, String testType, Map<String, dynamic> widgetsData, double resW, double resH) {
-    double getRelW(String t) => (t == 'clock' ? 250 : t == 'weather' ? 200 : t == 'calendar' ? 310 : 220) / resW;
-    double getRelH(String t) => (t == 'gas' ? 80 : t == 'calendar' ? 250 : 120) / resH;
+    double getRelW(String t) => (t == 'clock' ? 250 : t == 'weather' ? 200 : t == 'calendar' ? 310 : t == 'photo' ? 300 : 220) / resW;
+    double getRelH(String t) => (t == 'gas' ? 80 : t == 'calendar' ? 250 : t == 'photo' ? 300 : 120) / resH;
 
     Rect testRect = Rect.fromLTWH(testX, testY, getRelW(testType), getRelH(testType));
 
@@ -171,8 +173,8 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                                 double scale = (wData['scale'] ?? 1.0).toDouble();
 
                                 // APLICA A ESCALA AOS TAMANHOS ORIGINAIS
-                                double wWidth = (type == 'clock' ? 250 : type == 'weather' ? 200 : type == 'calendar' ? 310 : 220) * scale;
-                                double wHeight = (type == 'gas' ? 80 : type == 'calendar' ? 250 : 120) * scale;
+                                double wWidth = (type == 'clock' ? 250 : type == 'weather' ? 200 : type == 'calendar' ? 310 : type == 'photo' ? 300 : 220) * scale;
+                                double wHeight = (type == 'gas' ? 80 : type == 'calendar' ? 250 : type == 'photo' ? 300 : 120) * scale;
 
                                 renderedWidgets.add(
                                   SmartDraggable(
@@ -233,6 +235,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                           _buildMenuDraggableIcon('weather', Icons.cloud),
                           _buildMenuDraggableIcon('gas', Icons.gas_meter),
                           _buildMenuDraggableIcon('calendar', Icons.calendar_month),
+                          _buildMenuDraggableIcon('photo', Icons.image),
                         ]
                       ],
                     ),
@@ -277,6 +280,10 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
         newData['view_mode'] = prefs['view_mode'] ?? 'Semana';
         newData['scale'] = prefs['scale'] ?? 1.0;
       }
+      if (type == 'photo') {
+        newData['image_urls'] = [];
+        newData['slide_interval'] = 10; // Troca de foto a cada 10 segundos
+      }
     }
 
     await FirebaseFirestore.instance.collection('windows').doc(widget.windowId).set({'widgets': {uniqueId: newData}}, SetOptions(merge: true));
@@ -298,18 +305,6 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
   // ==========================================
   // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
   // ==========================================
-  // ==========================================
-  // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
-  // ==========================================
-  // ==========================================
-  // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
-  // ==========================================
-  // ==========================================
-  // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
-  // ==========================================
-  // ==========================================
-  // MENU DE CONFIGURAÇÕES E PERSONALIZAÇÃO
-  // ==========================================
   void _openSettingsMenu(String id, String type, Map<String, dynamic> wData) {
     if (type == 'gas') return;
 
@@ -327,6 +322,18 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     Color calendarBgColor = _hexToColor(originalBgColor);
     Color calendarTitleColor = _hexToColor(originalTitleColor);
     Color calendarTimeColor = _hexToColor(originalTimeColor);
+
+    // LER LISTA DE FOTOS DO SLIDESHOW
+    List<dynamic> photoUrlsDynamic = wData['image_urls'] ?? [];
+    List<String> photoUrls = photoUrlsDynamic.map((e) => e.toString()).toList();
+
+    // Compatibilidade com a versão antiga de foto única
+    if (photoUrls.isEmpty && wData['image_url'] != null && wData['image_url'].toString().isNotEmpty) {
+      photoUrls.add(wData['image_url'].toString());
+    }
+
+    int slideInterval = wData['slide_interval'] ?? 10;
+    bool isUploadingPhoto = false;
 
     String selectedCity = wData['location'] ?? 'Lisboa, Portugal';
     String selectedLat = wData['lat']?.toString() ?? '38.7071';
@@ -520,6 +527,111 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                     )
                   ],
 
+                  if (type == 'photo') ...[
+                    const Text("Imagens do Slideshow", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    const SizedBox(height: 10),
+
+                    // GRELHA COM AS FOTOS JÁ ADICIONADAS
+                    if (photoUrls.isNotEmpty)
+                      SizedBox(
+                        height: 100,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: photoUrls.length,
+                          itemBuilder: (context, index) {
+                            String pUrl = photoUrls[index];
+                            ImageProvider imgProvider;
+                            if (pUrl.startsWith('data:image')) {
+                              String base64String = pUrl.split(',').last;
+                              imgProvider = MemoryImage(base64Decode(base64String));
+                            } else {
+                              imgProvider = NetworkImage(pUrl);
+                            }
+
+                            return Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Container(
+                                  width: 100,
+                                  margin: const EdgeInsets.only(right: 15),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                    image: DecorationImage(image: imgProvider, fit: BoxFit.cover),
+                                  ),
+                                ),
+                                // BOTÃO DE APAGAR FOTO
+                                Positioned(
+                                  top: -5, right: 5,
+                                  child: Container(
+                                    decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                                    child: IconButton(
+                                      icon: const Icon(Icons.cancel, color: Colors.redAccent, size: 20),
+                                      constraints: const BoxConstraints(), padding: EdgeInsets.zero,
+                                      onPressed: () {
+                                        setModalState(() => photoUrls.removeAt(index));
+                                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                                          'widgets.$id.image_urls': photoUrls,
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                )
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+
+                    const SizedBox(height: 15),
+
+                    // BOTÃO DE ADICIONAR MAIS FOTOS
+                    ElevatedButton.icon(
+                      icon: isUploadingPhoto ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.add_photo_alternate),
+                      label: Text(isUploadingPhoto ? "A processar foto..." : "Adicionar Foto da Galeria"),
+                      onPressed: isUploadingPhoto ? null : () async {
+                        final picker = ImagePicker();
+                        final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 50, maxWidth: 600);
+
+                        if (pickedFile != null) {
+                          setModalState(() => isUploadingPhoto = true);
+                          try {
+                            final bytes = await pickedFile.readAsBytes();
+                            String base64Image = "data:image/jpeg;base64,${base64Encode(bytes)}";
+
+                            setModalState(() => photoUrls.add(base64Image)); // Adiciona à lista!
+
+                            FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                              'widgets.$id.image_urls': photoUrls,
+                            });
+                          } catch (e) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erro ao converter foto.")));
+                          }
+                          setModalState(() => isUploadingPhoto = false);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 45), backgroundColor: Colors.pinkAccent.shade700, foregroundColor: Colors.white),
+                    ),
+
+                    // MOSTRAR TEMPORIZADOR SÓ SE HOUVER MAIS DE 1 FOTO
+                    if (photoUrls.length > 1) ...[
+                      const SizedBox(height: 25),
+                      Text("Intervalo de Troca: $slideInterval segundos", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      Slider(
+                        value: slideInterval.toDouble(),
+                        min: 3, max: 60, divisions: 57,
+                        activeColor: Colors.pinkAccent.shade700,
+                        label: "$slideInterval s",
+                        onChanged: (val) {
+                          setModalState(() => slideInterval = val.toInt());
+                          FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                            'widgets.$id.slide_interval': slideInterval,
+                          });
+                        },
+                      ),
+                    ],
+                  ],
+
                   // --- SLIDER DE TAMANHO (ESCALA) ---
                   const Divider(height: 30),
                   const Text("Tamanho do Widget", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -582,6 +694,12 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                           }
                         });
                       }
+                      if (type == 'photo') {
+                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                          'widgets.$id.image_urls': photoUrls,
+                          'widgets.$id.slide_interval': slideInterval,
+                        });
+                      }
                       Navigator.pop(context);
                     },
                     style: ElevatedButton.styleFrom(
@@ -619,6 +737,34 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
       return Container(
         decoration: BoxDecoration(color: Colors.deepPurple.shade700, borderRadius: BorderRadius.circular(6)), alignment: Alignment.center,
         child: const FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: EdgeInsets.all(4.0), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.calendar_month, color: Colors.white, size: 24), SizedBox(height: 2), Text("Calendário Google", style: TextStyle(color: Colors.white, fontSize: 10))]))),
+      );
+    } else if (type == 'photo') {
+      List<dynamic> urls = data['image_urls'] ?? [];
+      String photoUrl = urls.isNotEmpty ? urls.first.toString() : (data['image_url'] ?? '');
+
+      if (photoUrl.isNotEmpty) {
+        ImageProvider imgProvider;
+
+        // MAGIA: Deteta se é uma imagem convertida (Base64) ou um link normal da net
+        if (photoUrl.startsWith('data:image')) {
+          String base64String = photoUrl.split(',').last;
+          imgProvider = MemoryImage(base64Decode(base64String));
+        } else {
+          imgProvider = NetworkImage(photoUrl);
+        }
+
+        return Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            image: DecorationImage(image: imgProvider, fit: BoxFit.cover),
+          ),
+        );
+      }
+
+      // Se ainda não houver imagem, mostra o bloco rosa de placeholder
+      return Container(
+        decoration: BoxDecoration(color: Colors.pinkAccent.shade700, borderRadius: BorderRadius.circular(6)), alignment: Alignment.center,
+        child: const FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: EdgeInsets.all(4.0), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.image, color: Colors.white, size: 24), SizedBox(height: 2), Text("Fotografia", style: TextStyle(color: Colors.white, fontSize: 10))]))),
       );
     } else {
       return Container(decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(6)), alignment: Alignment.center, child: const FittedBox(fit: BoxFit.scaleDown, child: Padding(padding: EdgeInsets.all(4.0), child: Text("GÁS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)))));
