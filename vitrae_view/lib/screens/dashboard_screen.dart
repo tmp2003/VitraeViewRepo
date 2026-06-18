@@ -203,7 +203,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           return _buildWindowCard(
                             windowId,
                             windowData['nome'] ?? 'Sem nome',
-                            windowData['estado'] ?? 'Desligada', // Default para Desligada
+                            windowData['estado'] ?? 'Desligada',
+                            currentAreaId, // NOVO: Passa o ID da área atual
+                            areasDocs,     // NOVO: Passa a lista completa de áreas para o Dropdown
                           );
                         },
                       );
@@ -356,8 +358,85 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- SUBSTITUI O TEU _buildWindowCard POR ESTE (Agora tem onLongPress) ---
-  Widget _buildWindowCard(String windowId, String nome, String estado) {
+  // --- NOVO MÉTODO: Pop-Up de Editar Janela ---
+  void _showEditWindowDialog(String windowId, String currentName, String currentAreaId, List<QueryDocumentSnapshot> areasList) {
+    final TextEditingController nameController = TextEditingController(text: currentName);
+    String selectedAreaId = currentAreaId;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.edit, color: Colors.blueAccent),
+              SizedBox(width: 10),
+              Text("Editar Janela"),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: "Nome da janela",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 20),
+              DropdownButtonFormField<String>(
+                value: selectedAreaId,
+                decoration: const InputDecoration(
+                  labelText: "Divisão (Área)",
+                  border: OutlineInputBorder(),
+                ),
+                items: areasList.map((doc) {
+                  return DropdownMenuItem<String>(
+                    value: doc.id,
+                    child: Text(doc['nome']),
+                  );
+                }).toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    selectedAreaId = val;
+                  }
+                },
+              ),
+            ],
+          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancelar", style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                if (nameController.text.trim().isEmpty) return;
+
+                Navigator.pop(context); // Fecha o pop-up
+                // Atualiza os dados na Cloud Firestore
+                await FirebaseFirestore.instance.collection('windows').doc(windowId).update({
+                  'nome': nameController.text.trim(),
+                  'areaId': selectedAreaId,
+                });
+                if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Janela atualizada!')));
+              },
+              child: const Text("Guardar"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+
+  Widget _buildWindowCard(String windowId, String nome, String estado, String currentAreaId, List<QueryDocumentSnapshot> areasDocs) {
     bool isOn = (estado == 'Ativa');
     String displayEstado = isOn ? 'Ativa' : 'Inativa';
 
@@ -365,31 +444,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
       onTap: () {
         Navigator.push(context, MaterialPageRoute(builder: (context) => WindowEditorScreen(windowId: windowId)));
       },
-      // MAGIA: Pressionar longo para apagar a janela!
       onLongPress: () => _showDeleteWindowDialog(windowId, nome),
       borderRadius: BorderRadius.circular(20),
       child: Container(
-        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))],
           border: Border.all(color: Colors.blueAccent.withOpacity(0.1)),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Stack(
           children: [
-            Icon(isOn ? Icons.window : Icons.window_outlined, size: 50, color: Colors.blueAccent),
-            const SizedBox(height: 12),
-            Text(nome, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(
-                color: isOn ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
+            // O botão de edição no canto superior direito
+            Positioned(
+              top: 0,
+              right: 0,
+              child: IconButton(
+                icon: const Icon(Icons.edit, color: Colors.grey, size: 20),
+                onPressed: () => _showEditWindowDialog(windowId, nome, currentAreaId, areasDocs),
               ),
-              child: Text(displayEstado, style: TextStyle(color: isOn ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+            ),
+            // O conteúdo principal centrado
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(isOn ? Icons.window : Icons.window_outlined, size: 50, color: Colors.blueAccent),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Text(nome, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isOn ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(displayEstado, style: TextStyle(color: isOn ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
