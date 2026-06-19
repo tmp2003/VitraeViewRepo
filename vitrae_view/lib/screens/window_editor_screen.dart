@@ -381,6 +381,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
     }
 
     int slideInterval = wData['slide_interval'] ?? 10;
+    int widgetRotation = wData['rotation_turns'] ?? 0; // <--- NOVA VARIÁVEL DE ROTAÇÃO AQUI
     bool isUploadingPhoto = false;
 
     String selectedCity = wData['location'] ?? 'Lisboa, Portugal';
@@ -452,7 +453,8 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          "Personalizar ${type == 'clock' ? 'Relógio' : type == 'weather' ? 'Meteorologia' : 'Calendário'}",
+                          // AGORA DIZ "Fotografia" CORRETAMENTE!
+                          "Personalizar ${type == 'clock' ? 'Relógio' : type == 'weather' ? 'Meteorologia' : type == 'photo' ? 'Fotografia' : 'Calendário'}",
                           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                         ),
                       ),
@@ -599,13 +601,15 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                             return Stack(
                               clipBehavior: Clip.none,
                               children: [
+                                // REMOVIDO O RotatedBox DAQUI! Fica apenas o Container.
+                                // A imagem vai aparecer sempre direita e contida no quadrado do menu.
                                 Container(
                                   width: 100,
                                   margin: const EdgeInsets.only(right: 15),
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(10),
                                     border: Border.all(color: Colors.grey.shade300),
-                                    image: DecorationImage(image: imgProvider, fit: BoxFit.cover),
+                                    image: DecorationImage(image: imgProvider, fit: BoxFit.contain),
                                   ),
                                 ),
                                 // BOTÃO DE APAGAR FOTO
@@ -633,6 +637,25 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
 
                     const SizedBox(height: 15),
 
+                    // --- NOVO BOTÃO: GIRAR IMAGEM ---
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.rotate_90_degrees_cw),
+                      label: const Text("Girar Imagem 90º"),
+                      onPressed: () {
+                        setModalState(() => widgetRotation = (widgetRotation + 1) % 4);
+                        // Atualiza logo a Firebase para veres a magia ao vivo no canvas
+                        FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
+                          'widgets.$id.rotation_turns': widgetRotation,
+                        });
+                      },
+                      style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 45),
+                          backgroundColor: Colors.orangeAccent.shade700,
+                          foregroundColor: Colors.white
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
                     // BOTÃO DE ADICIONAR MAIS FOTOS
                     ElevatedButton.icon(
                       icon: isUploadingPhoto ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.add_photo_alternate),
@@ -647,7 +670,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                             final bytes = await pickedFile.readAsBytes();
                             String base64Image = "data:image/jpeg;base64,${base64Encode(bytes)}";
 
-                            setModalState(() => photoUrls.add(base64Image)); // Adiciona à lista!
+                            setModalState(() => photoUrls.add(base64Image));
 
                             FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
                               'widgets.$id.image_urls': photoUrls,
@@ -746,6 +769,7 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
                         FirebaseFirestore.instance.collection('windows').doc(widget.windowId).update({
                           'widgets.$id.image_urls': photoUrls,
                           'widgets.$id.slide_interval': slideInterval,
+                          'widgets.$id.rotation_turns': widgetRotation, // <--- ADICIONA ESTA LINHA
                         });
                       }
                       Navigator.pop(context);
@@ -790,10 +814,12 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
       List<dynamic> urls = data['image_urls'] ?? [];
       String photoUrl = urls.isNotEmpty ? urls.first.toString() : (data['image_url'] ?? '');
 
+      // LÊ QUANTAS VEZES A IMAGEM FOI GIRADA (0, 1, 2 ou 3)
+      int turns = data['rotation_turns'] ?? 0;
+
       if (photoUrl.isNotEmpty) {
         ImageProvider imgProvider;
 
-        // MAGIA: Deteta se é uma imagem convertida (Base64) ou um link normal da net
         if (photoUrl.startsWith('data:image')) {
           String base64String = photoUrl.split(',').last;
           imgProvider = MemoryImage(base64Decode(base64String));
@@ -801,10 +827,15 @@ class _WindowEditorScreenState extends State<WindowEditorScreen> {
           imgProvider = NetworkImage(photoUrl);
         }
 
-        return Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(6),
-            image: DecorationImage(image: imgProvider, fit: BoxFit.cover),
+        // ROTATED BOX APLICA A ROTAÇÃO!
+        return RotatedBox(
+          quarterTurns: turns,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              // BOXFIT.CONTAIN MOSTRA A FOTO TODA SEM CORTES!
+              image: DecorationImage(image: imgProvider, fit: BoxFit.contain),
+            ),
           ),
         );
       }
